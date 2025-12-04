@@ -27,3 +27,7 @@ futures = "0.3"
 
 # Waveform loading
 fstty-core = { workspace = true }
+wellen = { workspace = true }
+
+# Tree widget for hierarchy browser
+tui-tree-widget = { workspace = true }

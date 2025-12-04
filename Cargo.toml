@@ -22,7 +22,7 @@ fstapi = "0.0.3"
 # TUI
 ratatui = { version = "0.29", features = ["crossterm"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
-tui-tree-widget = "0.22"
+tui-tree-widget = "0.23"
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

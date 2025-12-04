@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use fstty_core::WaveformFile;
 
 use crate::file_picker::FilePicker;
+use crate::hierarchy_browser::HierarchyBrowser;
 
 /// Result of an async waveform load
 type LoadResult = std::result::Result<WaveformFile, String>;
@@ -117,6 +118,8 @@ pub struct App {
     popup: Option<Popup>,
     /// File picker
     file_picker: FilePicker,
+    /// Hierarchy browser for Browse tab
+    hierarchy_browser: HierarchyBrowser,
     /// Currently loaded file path
     loaded_file: Option<PathBuf>,
     /// Loaded waveform (hierarchy only)
@@ -167,6 +170,7 @@ impl App {
             exit: false,
             popup: None,
             file_picker,
+            hierarchy_browser: HierarchyBrowser::new(),
             loaded_file: None,
             waveform: None,
             load_tx: request_tx,
@@ -223,6 +227,7 @@ impl App {
             Ok(waveform) => {
                 let num_signals = waveform.num_unique_signals();
                 self.waveform = Some(waveform);
+                self.hierarchy_browser.reset();
                 self.show_toast(
                     "Loaded",
                     format!("{} signals", num_signals),
@@ -232,6 +237,7 @@ impl App {
             Err(e) => {
                 self.loaded_file = None;
                 self.waveform = None;
+                self.hierarchy_browser.reset();
                 self.show_error("Load Error", e);
             }
         }
@@ -456,6 +462,22 @@ impl App {
             KeyCode::Char('2') => self.active_tab = Tab::Convert,
             KeyCode::Char('3') => self.active_tab = Tab::Filter,
             KeyCode::Char('4') => self.active_tab = Tab::Analyze,
+            // Hierarchy browser navigation (when on Browse tab with a file loaded)
+            KeyCode::Up | KeyCode::Char('k') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.up();
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.down();
+            }
+            KeyCode::Left | KeyCode::Char('h') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.left();
+            }
+            KeyCode::Right | KeyCode::Char('l') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.right();
+            }
+            KeyCode::Enter if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.toggle();
+            }
             _ => {}
         }
     }
@@ -525,7 +547,7 @@ impl App {
     }
 
     /// Render content for the active tab
-    fn render_tab_content(&self, frame: &mut Frame, area: Rect) {
+    fn render_tab_content(&mut self, frame: &mut Frame, area: Rect) {
         match self.active_tab {
             Tab::Browse => self.render_browse_tab(frame, area),
             Tab::Convert => {
@@ -549,59 +571,18 @@ impl App {
         }
     }
 
-    /// Render the Browse tab with hierarchy info
-    fn render_browse_tab(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL);
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
+    /// Render the Browse tab with hierarchy tree
+    fn render_browse_tab(&mut self, frame: &mut Frame, area: Rect) {
         if let Some(ref waveform) = self.waveform {
             let hierarchy = waveform.hierarchy();
-            let num_signals = waveform.num_unique_signals();
-
-            // Count top-level items
-            let top_scopes: Vec<_> = hierarchy.scopes().collect();
-            let top_vars: Vec<_> = hierarchy.vars().collect();
-
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled("Format: ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(format!("{:?}", waveform.format())),
-                ]),
-                Line::from(vec![
-                    Span::styled("Signals: ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(format!("{}", num_signals)),
-                ]),
-                Line::from(vec![
-                    Span::styled("Top-level: ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(format!("{} scopes, {} vars", top_scopes.len(), top_vars.len())),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "Hierarchy tree coming soon...",
-                    Style::default().fg(Color::DarkGray).italic(),
-                )),
-            ];
-
-            // Show first few top-level scopes
-            if !top_scopes.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled("Top scopes:", Style::default().bold())));
-                for scope_ref in top_scopes.iter().take(10) {
-                    let scope = &hierarchy[*scope_ref];
-                    lines.push(Line::from(format!("  {} ({:?})", scope.name(hierarchy), scope.scope_type())));
-                }
-                if top_scopes.len() > 10 {
-                    lines.push(Line::from(Span::styled(
-                        format!("  ... and {} more", top_scopes.len() - 10),
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                }
-            }
-
-            let paragraph = Paragraph::new(lines);
-            frame.render_widget(paragraph, inner);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} signals ", waveform.num_unique_signals()));
+            self.hierarchy_browser.render(frame, area, hierarchy, block);
         } else {
+            let block = Block::default().borders(Borders::ALL);
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
             let paragraph = Paragraph::new("No file loaded. Press 'o' to open.")
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, inner);
