@@ -42,7 +42,8 @@ struct Args {
     tab: Option<String>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Configure thread pool (for rayon-based parallelism in wellen)
@@ -92,7 +93,7 @@ fn main() -> Result<()> {
     }
 
     // Run the TUI application
-    app.run()?;
+    app.run().await?;
 
     Ok(())
 }

@@ -1,17 +1,21 @@
 //! Application state and lifecycle
 
-use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
+use futures::StreamExt;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
+use tokio::sync::mpsc;
 
 use fstty_core::WaveformFile;
 
 use crate::file_picker::FilePicker;
+
+/// Result of an async waveform load
+type LoadResult = std::result::Result<WaveformFile, String>;
 
 /// Available tabs/tools
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -117,8 +121,10 @@ pub struct App {
     loaded_file: Option<PathBuf>,
     /// Loaded waveform (hierarchy only)
     waveform: Option<WaveformFile>,
-    /// Pending file to load (deferred so UI can update first)
-    pending_load: Option<PathBuf>,
+    /// Channel sender to trigger async loads
+    load_tx: mpsc::Sender<PathBuf>,
+    /// Channel receiver for completed loads
+    load_rx: mpsc::Receiver<LoadResult>,
     /// Busy spinner
     spinner: Spinner,
     /// Current busy status message (None = not busy)
@@ -131,13 +137,40 @@ impl App {
     /// Create a new application
     pub fn new() -> Result<Self> {
         let file_picker = FilePicker::new(".")?;
+
+        // Channel for requesting loads (UI -> loader task)
+        let (request_tx, mut request_rx) = mpsc::channel::<PathBuf>(1);
+        // Channel for receiving results (loader task -> UI)
+        let (result_tx, result_rx) = mpsc::channel::<LoadResult>(1);
+
+        // Spawn the loader task
+        tokio::spawn(async move {
+            while let Some(path) = request_rx.recv().await {
+                // Run blocking waveform load on the blocking thread pool
+                let result = tokio::task::spawn_blocking(move || {
+                    WaveformFile::open(&path)
+                        .map_err(|e| e.to_string())
+                }).await;
+
+                // Handle join error and send result
+                let load_result = match result {
+                    Ok(r) => r,
+                    Err(e) => Err(format!("Load task panicked: {}", e)),
+                };
+
+                // Send result back (ignore error if receiver dropped)
+                let _ = result_tx.send(load_result).await;
+            }
+        });
+
         Ok(Self {
             exit: false,
             popup: None,
             file_picker,
             loaded_file: None,
             waveform: None,
-            pending_load: None,
+            load_tx: request_tx,
+            load_rx: result_rx,
             spinner: Spinner::new(),
             busy_status: None,
             active_tab: Tab::default(),
@@ -175,22 +208,21 @@ impl App {
         self.loaded_file = Some(path);
     }
 
-    /// Queue a waveform file for loading (deferred to allow UI update)
-    fn queue_load_waveform(&mut self, path: PathBuf) {
+    /// Start async loading of a waveform file
+    fn start_load(&mut self, path: PathBuf) {
         self.loaded_file = Some(path.clone());
         self.set_busy("Loading hierarchy...");
-        self.pending_load = Some(path);
+        // Send to loader task (non-blocking, will fail if channel full)
+        let _ = self.load_tx.try_send(path);
     }
 
-    /// Actually load the waveform file (called from main loop after draw)
-    fn do_load_waveform(&mut self, path: PathBuf) {
-        // Note: This blocks the UI. For large files (~7s in release mode),
-        // we'd want async loading. The spinner won't animate during load.
-        match WaveformFile::open(&path) {
+    /// Handle a completed load result
+    fn handle_load_result(&mut self, result: LoadResult) {
+        self.clear_busy();
+        match result {
             Ok(waveform) => {
                 let num_signals = waveform.num_unique_signals();
                 self.waveform = Some(waveform);
-                self.clear_busy();
                 self.show_toast(
                     "Loaded",
                     format!("{} signals", num_signals),
@@ -200,8 +232,7 @@ impl App {
             Err(e) => {
                 self.loaded_file = None;
                 self.waveform = None;
-                self.clear_busy();
-                self.show_error("Load Error", format!("{}", e));
+                self.show_error("Load Error", e);
             }
         }
     }
@@ -258,8 +289,12 @@ impl App {
     }
 
     /// Run the application main loop
-    pub fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let mut terminal = ratatui::init();
+        let mut event_stream = EventStream::new();
+
+        // Tick interval for spinner animation
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(80));
 
         while !self.exit {
             // Check for expired popups
@@ -271,21 +306,34 @@ impl App {
                 }
             }
 
-            // Tick spinner if busy
-            if self.busy_status.is_some() {
-                self.spinner.tick();
-            }
-
+            // Draw current state
             terminal.draw(|frame| self.render(frame))?;
 
-            // Process pending load AFTER drawing (so spinner is visible)
-            if let Some(path) = self.pending_load.take() {
-                self.do_load_waveform(path);
-                // Immediately redraw to show result
-                terminal.draw(|frame| self.render(frame))?;
-            }
+            // Wait for next event using select!
+            tokio::select! {
+                // Keyboard/terminal events
+                maybe_event = event_stream.next() => {
+                    if let Some(Ok(event)) = maybe_event {
+                        if let Event::Key(key) = event {
+                            if key.kind == KeyEventKind::Press {
+                                self.handle_key(key.code);
+                            }
+                        }
+                    }
+                }
 
-            self.handle_events()?;
+                // Tick for spinner animation
+                _ = tick_interval.tick() => {
+                    if self.busy_status.is_some() {
+                        self.spinner.tick();
+                    }
+                }
+
+                // Load results from background task
+                Some(result) = self.load_rx.recv() => {
+                    self.handle_load_result(result);
+                }
+            }
         }
 
         ratatui::restore();
@@ -339,18 +387,6 @@ impl App {
         }
     }
 
-    /// Handle events with sync poll + read pattern
-    fn handle_events(&mut self) -> io::Result<()> {
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    self.handle_key(key.code);
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Handle a key press
     fn handle_key(&mut self, code: KeyCode) {
         // Screenshot always works
@@ -375,7 +411,7 @@ impl App {
                     match self.file_picker.select() {
                         Ok(Some(path)) => {
                             self.file_picker.close();
-                            self.queue_load_waveform(path);
+                            self.start_load(path);
                         }
                         Ok(None) => {} // Navigated into directory
                         Err(e) => {
