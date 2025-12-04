@@ -1,4 +1,4 @@
-//! Application state and lifecycle - Minimal TUI
+//! Application state and lifecycle
 
 use std::io;
 use std::path::PathBuf;
@@ -8,6 +8,8 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
+
+use fstty_core::WaveformFile;
 
 use crate::file_picker::FilePicker;
 
@@ -111,8 +113,12 @@ pub struct App {
     popup: Option<Popup>,
     /// File picker
     file_picker: FilePicker,
-    /// Currently loaded file
+    /// Currently loaded file path
     loaded_file: Option<PathBuf>,
+    /// Loaded waveform (hierarchy only)
+    waveform: Option<WaveformFile>,
+    /// Pending file to load (deferred so UI can update first)
+    pending_load: Option<PathBuf>,
     /// Busy spinner
     spinner: Spinner,
     /// Current busy status message (None = not busy)
@@ -130,6 +136,8 @@ impl App {
             popup: None,
             file_picker,
             loaded_file: None,
+            waveform: None,
+            pending_load: None,
             spinner: Spinner::new(),
             busy_status: None,
             active_tab: Tab::default(),
@@ -165,6 +173,37 @@ impl App {
     /// Set loaded file (for testing/screenshots)
     pub fn set_loaded_file(&mut self, path: PathBuf) {
         self.loaded_file = Some(path);
+    }
+
+    /// Queue a waveform file for loading (deferred to allow UI update)
+    fn queue_load_waveform(&mut self, path: PathBuf) {
+        self.loaded_file = Some(path.clone());
+        self.set_busy("Loading hierarchy...");
+        self.pending_load = Some(path);
+    }
+
+    /// Actually load the waveform file (called from main loop after draw)
+    fn do_load_waveform(&mut self, path: PathBuf) {
+        // Note: This blocks the UI. For large files (~7s in release mode),
+        // we'd want async loading. The spinner won't animate during load.
+        match WaveformFile::open(&path) {
+            Ok(waveform) => {
+                let num_signals = waveform.num_unique_signals();
+                self.waveform = Some(waveform);
+                self.clear_busy();
+                self.show_toast(
+                    "Loaded",
+                    format!("{} signals", num_signals),
+                    Duration::from_secs(3),
+                );
+            }
+            Err(e) => {
+                self.loaded_file = None;
+                self.waveform = None;
+                self.clear_busy();
+                self.show_error("Load Error", format!("{}", e));
+            }
+        }
     }
 
     /// Set active tab by name or number (for testing/screenshots)
@@ -238,6 +277,14 @@ impl App {
             }
 
             terminal.draw(|frame| self.render(frame))?;
+
+            // Process pending load AFTER drawing (so spinner is visible)
+            if let Some(path) = self.pending_load.take() {
+                self.do_load_waveform(path);
+                // Immediately redraw to show result
+                terminal.draw(|frame| self.render(frame))?;
+            }
+
             self.handle_events()?;
         }
 
@@ -327,13 +374,8 @@ impl App {
                 KeyCode::Enter | KeyCode::Char('l') => {
                     match self.file_picker.select() {
                         Ok(Some(path)) => {
-                            self.loaded_file = Some(path.clone());
                             self.file_picker.close();
-                            self.show_toast(
-                                "Opened",
-                                format!("{}", path.display()),
-                                Duration::from_secs(2),
-                            );
+                            self.queue_load_waveform(path);
                         }
                         Ok(None) => {} // Navigated into directory
                         Err(e) => {
@@ -448,24 +490,86 @@ impl App {
 
     /// Render content for the active tab
     fn render_tab_content(&self, frame: &mut Frame, area: Rect) {
-        let content = match self.active_tab {
-            Tab::Browse => {
-                if self.loaded_file.is_some() {
-                    // Will show hierarchy tree later
-                    "Hierarchy tree will go here"
-                } else {
-                    "No file loaded. Press 'o' to open."
+        match self.active_tab {
+            Tab::Browse => self.render_browse_tab(frame, area),
+            Tab::Convert => {
+                let paragraph = Paragraph::new("VCD → FST conversion tools")
+                    .alignment(Alignment::Center)
+                    .block(Block::default().borders(Borders::ALL));
+                frame.render_widget(paragraph, area);
+            }
+            Tab::Filter => {
+                let paragraph = Paragraph::new("Signal filtering and time windowing")
+                    .alignment(Alignment::Center)
+                    .block(Block::default().borders(Borders::ALL));
+                frame.render_widget(paragraph, area);
+            }
+            Tab::Analyze => {
+                let paragraph = Paragraph::new("Analysis plugins and queries")
+                    .alignment(Alignment::Center)
+                    .block(Block::default().borders(Borders::ALL));
+                frame.render_widget(paragraph, area);
+            }
+        }
+    }
+
+    /// Render the Browse tab with hierarchy info
+    fn render_browse_tab(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if let Some(ref waveform) = self.waveform {
+            let hierarchy = waveform.hierarchy();
+            let num_signals = waveform.num_unique_signals();
+
+            // Count top-level items
+            let top_scopes: Vec<_> = hierarchy.scopes().collect();
+            let top_vars: Vec<_> = hierarchy.vars().collect();
+
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("Format: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{:?}", waveform.format())),
+                ]),
+                Line::from(vec![
+                    Span::styled("Signals: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{}", num_signals)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Top-level: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{} scopes, {} vars", top_scopes.len(), top_vars.len())),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Hierarchy tree coming soon...",
+                    Style::default().fg(Color::DarkGray).italic(),
+                )),
+            ];
+
+            // Show first few top-level scopes
+            if !top_scopes.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("Top scopes:", Style::default().bold())));
+                for scope_ref in top_scopes.iter().take(10) {
+                    let scope = &hierarchy[*scope_ref];
+                    lines.push(Line::from(format!("  {} ({:?})", scope.name(hierarchy), scope.scope_type())));
+                }
+                if top_scopes.len() > 10 {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ... and {} more", top_scopes.len() - 10),
+                        Style::default().fg(Color::DarkGray),
+                    )));
                 }
             }
-            Tab::Convert => "VCD → FST conversion tools",
-            Tab::Filter => "Signal filtering and time windowing",
-            Tab::Analyze => "Analysis plugins and queries",
-        };
 
-        let paragraph = Paragraph::new(content)
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(paragraph, area);
+            let paragraph = Paragraph::new(lines);
+            frame.render_widget(paragraph, inner);
+        } else {
+            let paragraph = Paragraph::new("No file loaded. Press 'o' to open.")
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, inner);
+        }
     }
 
     /// Render title bar with app name and status

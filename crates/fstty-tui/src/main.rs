@@ -17,6 +17,10 @@ struct Args {
     #[arg(short, long)]
     debug: bool,
 
+    /// Maximum number of threads to use (default: 1, 0 = all CPUs)
+    #[arg(short = 'j', long, value_name = "N", default_value = "1")]
+    threads: usize,
+
     /// Print a screenshot and exit (for testing)
     #[arg(long)]
     screenshot: bool,
@@ -40,6 +44,14 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Configure thread pool (for rayon-based parallelism in wellen)
+    if args.threads > 0 {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(args.threads)
+            .build_global()
+            .ok(); // Ignore error if already initialized
+    }
 
     // Set up logging
     if args.debug {

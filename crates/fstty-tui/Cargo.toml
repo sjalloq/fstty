@@ -19,10 +19,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
+rayon = "1.11"
 
-# Temporarily disabled for minimal TUI
-# fstty-core = { workspace = true }
-# wellen = { workspace = true }
-# tui-tree-widget = { workspace = true }
-# tokio = { workspace = true }
-# futures = { workspace = true }
+# Waveform loading
+fstty-core = { workspace = true }

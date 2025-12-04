@@ -1,5 +1,5 @@
 # Temporarily ignore other crates
-crates/fstty-core
+# crates/fstty-core
 crates/fstty-dataframe
 crates/fstty-plugins
 
