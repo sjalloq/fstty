@@ -16,6 +16,14 @@ struct Args {
     /// Enable debug logging to file
     #[arg(short, long)]
     debug: bool,
+
+    /// Print a screenshot and exit (for testing)
+    #[arg(long)]
+    screenshot: bool,
+
+    /// Show popup in screenshot (info, warning, error)
+    #[arg(long, value_name = "LEVEL")]
+    popup: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -34,8 +42,23 @@ fn main() -> Result<()> {
             .init();
     }
 
-    // Run the TUI application
     let mut app = App::new();
+
+    // Screenshot mode - render one frame and exit
+    if args.screenshot {
+        if let Some(level) = args.popup {
+            match level.as_str() {
+                "info" => app.show_info("Info", "This is an info message."),
+                "warning" => app.show_warning("Warning", "This is a warning message."),
+                "error" => app.show_error("Error", "This is an error message."),
+                _ => app.show_info("Unknown", &format!("Unknown level: {}", level)),
+            }
+        }
+        println!("{}", app.screenshot(80, 20));
+        return Ok(());
+    }
+
+    // Run the TUI application
     app.run()?;
 
     Ok(())

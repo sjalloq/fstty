@@ -1,12 +1,12 @@
 //! Application state and lifecycle - Minimal TUI
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
 
 /// Popup message level
 #[derive(Clone)]
@@ -22,6 +22,7 @@ pub struct Popup {
     pub title: String,
     pub message: String,
     pub level: PopupLevel,
+    pub expires_at: Option<Instant>,
 }
 
 /// Main application state
@@ -47,6 +48,7 @@ impl App {
             title: title.into(),
             message: message.into(),
             level: PopupLevel::Info,
+            expires_at: None,
         });
     }
 
@@ -56,6 +58,7 @@ impl App {
             title: title.into(),
             message: message.into(),
             level: PopupLevel::Warning,
+            expires_at: None,
         });
     }
 
@@ -65,6 +68,17 @@ impl App {
             title: title.into(),
             message: message.into(),
             level: PopupLevel::Error,
+            expires_at: None,
+        });
+    }
+
+    /// Show a popup that auto-dismisses after a duration
+    pub fn show_toast(&mut self, title: impl Into<String>, message: impl Into<String>, duration: Duration) {
+        self.popup = Some(Popup {
+            title: title.into(),
+            message: message.into(),
+            level: PopupLevel::Info,
+            expires_at: Some(Instant::now() + duration),
         });
     }
 
@@ -73,12 +87,68 @@ impl App {
         let mut terminal = ratatui::init();
 
         while !self.exit {
+            // Check for expired popups
+            if let Some(ref popup) = self.popup {
+                if let Some(expires_at) = popup.expires_at {
+                    if Instant::now() >= expires_at {
+                        self.popup = None;
+                    }
+                }
+            }
+
             terminal.draw(|frame| self.render(frame))?;
             self.handle_events()?;
         }
 
         ratatui::restore();
         Ok(())
+    }
+
+    /// Render a single frame to string (for screenshots/testing)
+    pub fn screenshot(&self, width: u16, height: u16) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| self.render(frame)).unwrap();
+
+        // Convert buffer to string
+        let buffer = terminal.backend().buffer().clone();
+        let mut output = String::new();
+
+        for y in 0..height {
+            for x in 0..width {
+                let cell = buffer.cell((x, y)).unwrap();
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+
+        output
+    }
+
+    /// Save screenshot to file with timestamp
+    fn save_screenshot(&mut self) {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Get terminal size or use default
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        let content = self.screenshot(width, height);
+
+        // Generate filename with timestamp
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let filename = format!("fstty-screenshot-{}.txt", timestamp);
+
+        match fs::write(&filename, &content) {
+            Ok(_) => self.show_toast("Screenshot", format!("Saved to {}", filename), Duration::from_secs(2)),
+            Err(e) => self.show_error("Screenshot", &format!("Failed to save: {}", e)),
+        }
     }
 
     /// Handle events with sync poll + read pattern
@@ -95,9 +165,17 @@ impl App {
 
     /// Handle a key press
     fn handle_key(&mut self, code: KeyCode) {
-        // If popup is showing, any key dismisses it
+        // Screenshot always works, even with popup
+        if matches!(code, KeyCode::Char('s') | KeyCode::Char('S')) {
+            self.save_screenshot();
+            return;
+        }
+
+        // If popup is showing, only Esc dismisses it
         if self.popup.is_some() {
-            self.popup = None;
+            if code == KeyCode::Esc {
+                self.popup = None;
+            }
             return;
         }
 
@@ -106,7 +184,7 @@ impl App {
                 self.exit = true;
             }
             KeyCode::Char('o') | KeyCode::Char('O') => {
-                self.show_info("Open", "File browser not yet implemented.\n\nPress any key to dismiss.");
+                self.show_info("Open", "File browser not yet implemented.\n\nPress Esc to dismiss.");
             }
             _ => {}
         }
@@ -130,7 +208,7 @@ impl App {
         frame.render_widget(main_content, chunks[0]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" Q:quit O:open")
+        let footer = Paragraph::new(" q: Quit | o: Open | s: Screenshot")
             .style(Style::default().reversed());
         frame.render_widget(footer, chunks[1]);
 
@@ -166,11 +244,12 @@ impl App {
         // Clear the area behind the popup
         frame.render_widget(Clear, popup_area);
 
-        // Create the popup block
+        // Create the popup block with padding
         let block = Block::default()
             .title(format!(" {}{} ", title_prefix, popup.title))
             .borders(Borders::ALL)
-            .border_style(border_style);
+            .border_style(border_style)
+            .padding(Padding::new(2, 2, 1, 1)); // left, right, top, bottom
 
         // Create the message paragraph
         let message = Paragraph::new(popup.message.as_str())
