@@ -669,12 +669,12 @@ impl App {
             let hierarchy = waveform.hierarchy();
             let block = Block::default()
                 .borders(Borders::ALL)
-                .padding(Padding::horizontal(1));
+                .padding(Padding::new(2, 2, 1, 1)); // left, right, top, bottom
             self.hierarchy_browser.render(frame, area, hierarchy, block);
         } else {
             let block = Block::default()
                 .borders(Borders::ALL)
-                .padding(Padding::horizontal(1));
+                .padding(Padding::horizontal(2));
             let inner = block.inner(area);
             frame.render_widget(block, area);
             let paragraph = Paragraph::new("No file loaded. Press 'o' to open.")

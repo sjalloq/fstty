@@ -392,16 +392,20 @@ impl HierarchyBrowser {
 
     /// Render the hierarchy browser
     pub fn render(&mut self, frame: &mut Frame, area: Rect, hierarchy: &Hierarchy, block: Block) {
+        // Render the block first and get the inner area (respects padding)
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        // Build and render the tree in the inner area
         let items = self.build_tree_items(hierarchy);
 
         let tree = Tree::new(&items)
             .expect("tree items should be valid")
-            .block(block)
             .highlight_style(Style::default().reversed())
             .node_closed_symbol("▶ ")
             .node_open_symbol("▼ ")
             .node_no_children_symbol("  ");
 
-        frame.render_stateful_widget(tree, area, &mut self.state);
+        frame.render_stateful_widget(tree, inner, &mut self.state);
     }
 }
