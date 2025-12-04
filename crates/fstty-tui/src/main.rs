@@ -24,6 +24,14 @@ struct Args {
     /// Show popup in screenshot (info, warning, error)
     #[arg(long, value_name = "LEVEL")]
     popup: Option<String>,
+
+    /// Show busy spinner in screenshot
+    #[arg(long, value_name = "MESSAGE")]
+    busy: Option<String>,
+
+    /// Simulate loaded file in screenshot
+    #[arg(long, value_name = "FILENAME")]
+    file: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -53,6 +61,12 @@ fn main() -> Result<()> {
                 "error" => app.show_error("Error", "This is an error message."),
                 _ => app.show_info("Unknown", &format!("Unknown level: {}", level)),
             }
+        }
+        if let Some(busy_msg) = args.busy {
+            app.set_busy(busy_msg);
+        }
+        if let Some(filename) = args.file {
+            app.set_loaded_file(std::path::PathBuf::from(filename));
         }
         println!("{}", app.screenshot(80, 20));
         return Ok(());

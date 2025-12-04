@@ -19,6 +19,39 @@ pub enum PopupLevel {
     Error,
 }
 
+/// Spinner for busy indication
+pub struct Spinner {
+    frames: &'static [&'static str],
+    current: usize,
+    last_update: Instant,
+    interval: Duration,
+}
+
+impl Spinner {
+    pub fn new() -> Self {
+        Self {
+            // Braille spinner - smooth and subtle
+            frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            current: 0,
+            last_update: Instant::now(),
+            interval: Duration::from_millis(80),
+        }
+    }
+
+    /// Advance the spinner if enough time has passed
+    pub fn tick(&mut self) {
+        if self.last_update.elapsed() >= self.interval {
+            self.current = (self.current + 1) % self.frames.len();
+            self.last_update = Instant::now();
+        }
+    }
+
+    /// Get current spinner frame
+    pub fn frame(&self) -> &'static str {
+        self.frames[self.current]
+    }
+}
+
 /// Popup message to display
 #[derive(Clone)]
 pub struct Popup {
@@ -38,6 +71,10 @@ pub struct App {
     file_picker: FilePicker,
     /// Currently loaded file
     loaded_file: Option<PathBuf>,
+    /// Busy spinner
+    spinner: Spinner,
+    /// Current busy status message (None = not busy)
+    busy_status: Option<String>,
 }
 
 impl App {
@@ -49,7 +86,24 @@ impl App {
             popup: None,
             file_picker,
             loaded_file: None,
+            spinner: Spinner::new(),
+            busy_status: None,
         })
+    }
+
+    /// Set busy status (shows spinner)
+    pub fn set_busy(&mut self, status: impl Into<String>) {
+        self.busy_status = Some(status.into());
+    }
+
+    /// Clear busy status
+    pub fn clear_busy(&mut self) {
+        self.busy_status = None;
+    }
+
+    /// Set loaded file (for testing/screenshots)
+    pub fn set_loaded_file(&mut self, path: PathBuf) {
+        self.loaded_file = Some(path);
     }
 
     /// Show an info popup
@@ -104,6 +158,11 @@ impl App {
                         self.popup = None;
                     }
                 }
+            }
+
+            // Tick spinner if busy
+            if self.busy_status.is_some() {
+                self.spinner.tick();
             }
 
             terminal.draw(|frame| self.render(frame))?;
@@ -245,30 +304,38 @@ impl App {
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
-        // Layout: main area + footer
+        // Layout: title bar (2 rows) + main area + footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(2), // Title bar + separator
                 Constraint::Min(1),    // Main content
                 Constraint::Length(1), // Footer
             ])
             .split(area);
 
+        // Title bar: "fstty" left, status right
+        self.render_title_bar(frame, chunks[0]);
+
         // Main content area - show loaded file or placeholder
-        let main_text = if let Some(ref path) = self.loaded_file {
-            format!("Loaded: {}", path.display())
+        if self.loaded_file.is_some() {
+            // Will show hierarchy tree etc. later
+            let main_content = Paragraph::new("")
+                .block(Block::default().borders(Borders::ALL));
+            frame.render_widget(main_content, chunks[1]);
         } else {
-            "No file loaded. Press 'o' to open.".to_string()
-        };
-        let main_content = Paragraph::new(main_text)
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title(" fstty "));
-        frame.render_widget(main_content, chunks[0]);
+            // Empty state
+            let main_text = "No file loaded. Press 'o' to open.";
+            let main_content = Paragraph::new(main_text)
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL));
+            frame.render_widget(main_content, chunks[1]);
+        }
 
         // Footer with key hints
         let footer = Paragraph::new(" q: quit | o: open | s: screenshot")
             .style(Style::default().reversed());
-        frame.render_widget(footer, chunks[1]);
+        frame.render_widget(footer, chunks[2]);
 
         // Render file picker on top if active
         if self.file_picker.active {
@@ -279,6 +346,60 @@ impl App {
         if let Some(ref popup) = self.popup {
             self.render_popup(frame, popup);
         }
+    }
+
+    /// Render title bar with app name and status
+    fn render_title_bar(&self, frame: &mut Frame, area: Rect) {
+        // Need 2 rows: content + border line
+        if area.height < 2 {
+            return;
+        }
+
+        let content_area = Rect { height: 1, ..area };
+        let border_area = Rect { y: area.y + 1, height: 1, ..area };
+
+        // Left side: "fstty" + optional " : filename"
+        let (title_base, title_file) = if let Some(ref path) = self.loaded_file {
+            let filename = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string());
+            (" fstty : ".to_string(), Some(filename))
+        } else {
+            (" fstty".to_string(), None)
+        };
+
+        // Right side: spinner + status message
+        let status = if let Some(ref busy_msg) = self.busy_status {
+            format!("{} {} ", self.spinner.frame(), busy_msg)
+        } else {
+            String::new()
+        };
+
+        // Calculate widths
+        let title_width = title_base.len() as u16 + title_file.as_ref().map(|f| f.len() as u16).unwrap_or(0);
+        let status_width = status.len() as u16;
+        let padding_width = area.width.saturating_sub(title_width + status_width);
+
+        // Build the line with spans
+        let mut spans = vec![
+            Span::styled(title_base, Style::default().bold()),
+        ];
+        if let Some(ref filename) = title_file {
+            spans.push(Span::styled(filename.clone(), Style::default().fg(Color::DarkGray)));
+        }
+        spans.push(Span::raw(" ".repeat(padding_width as usize)));
+        spans.push(Span::styled(status, Style::default().fg(Color::Cyan)));
+
+        let line = Line::from(spans);
+
+        let title_content = Paragraph::new(line);
+        frame.render_widget(title_content, content_area);
+
+        // Draw horizontal line underneath
+        let border_line = "─".repeat(area.width as usize);
+        let border = Paragraph::new(border_line)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(border, border_area);
     }
 
     /// Render a centered popup
