@@ -1,0 +1,28 @@
+[package]
+name = "fstty-tui"
+description = "TUI application for fstty waveform analysis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fstty"
+path = "src/main.rs"
+
+[dependencies]
+# Minimal TUI dependencies
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+# Temporarily disabled for minimal TUI
+# fstty-core = { workspace = true }
+# wellen = { workspace = true }
+# tui-tree-widget = { workspace = true }
+# tokio = { workspace = true }
+# futures = { workspace = true }
