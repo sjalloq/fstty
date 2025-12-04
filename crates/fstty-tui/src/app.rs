@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use fstty_core::WaveformFile;
 
 use crate::file_picker::FilePicker;
-use crate::hierarchy_browser::HierarchyBrowser;
+use crate::hierarchy_browser::{HierarchyBrowser, ALL_SCOPE_TYPES};
 
 /// Result of an async waveform load
 type LoadResult = std::result::Result<WaveformFile, String>;
@@ -110,6 +110,45 @@ pub struct Popup {
     pub expires_at: Option<Instant>,
 }
 
+/// Filter popup state
+pub struct FilterPopup {
+    /// Is the popup active
+    pub active: bool,
+    /// Currently selected item index
+    pub selected: usize,
+}
+
+impl FilterPopup {
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            selected: 0,
+        }
+    }
+
+    pub fn open(&mut self) {
+        self.active = true;
+        self.selected = 0;
+    }
+
+    pub fn close(&mut self) {
+        self.active = false;
+    }
+
+    pub fn up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn down(&mut self) {
+        // +3 for "All", "None", "Default" options at the end
+        if self.selected < ALL_SCOPE_TYPES.len() + 2 {
+            self.selected += 1;
+        }
+    }
+}
+
 /// Main application state
 pub struct App {
     /// Should quit
@@ -118,6 +157,8 @@ pub struct App {
     popup: Option<Popup>,
     /// File picker
     file_picker: FilePicker,
+    /// Filter configuration popup
+    filter_popup: FilterPopup,
     /// Hierarchy browser for Browse tab
     hierarchy_browser: HierarchyBrowser,
     /// Currently loaded file path
@@ -170,6 +211,7 @@ impl App {
             exit: false,
             popup: None,
             file_picker,
+            filter_popup: FilterPopup::new(),
             hierarchy_browser: HierarchyBrowser::new(),
             loaded_file: None,
             waveform: None,
@@ -225,14 +267,9 @@ impl App {
         self.clear_busy();
         match result {
             Ok(waveform) => {
-                let num_signals = waveform.num_unique_signals();
                 self.waveform = Some(waveform);
                 self.hierarchy_browser.reset();
-                self.show_toast(
-                    "Loaded",
-                    format!("{} signals", num_signals),
-                    Duration::from_secs(3),
-                );
+                // No toast - the loaded file in title bar is sufficient feedback
             }
             Err(e) => {
                 self.loaded_file = None;
@@ -395,8 +432,8 @@ impl App {
 
     /// Handle a key press
     fn handle_key(&mut self, code: KeyCode) {
-        // Screenshot always works
-        if matches!(code, KeyCode::Char('s') | KeyCode::Char('S')) {
+        // Screenshot with Shift-S (uppercase S only)
+        if matches!(code, KeyCode::Char('S')) {
             self.save_screenshot();
             return;
         }
@@ -429,6 +466,40 @@ impl App {
                     // Go to parent directory
                     if let Err(e) = self.file_picker.select() {
                         self.show_error("Error", format!("{}", e));
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Filter popup has priority when active
+        if self.filter_popup.active {
+            match code {
+                KeyCode::Esc => {
+                    self.filter_popup.close();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.filter_popup.up();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.filter_popup.down();
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    // Toggle selected item
+                    let idx = self.filter_popup.selected;
+                    if idx < ALL_SCOPE_TYPES.len() {
+                        // Toggle a scope type
+                        let (scope_type, _, _) = ALL_SCOPE_TYPES[idx];
+                        self.hierarchy_browser.filter_mut().toggle_scope_type(scope_type);
+                    } else {
+                        // Special actions: All, None, Default
+                        match idx - ALL_SCOPE_TYPES.len() {
+                            0 => self.hierarchy_browser.filter_mut().enable_all_scopes(),
+                            1 => self.hierarchy_browser.filter_mut().disable_all_scopes(),
+                            2 => self.hierarchy_browser.filter_mut().reset_to_default(),
+                            _ => {}
+                        }
                     }
                 }
                 _ => {}
@@ -478,6 +549,22 @@ impl App {
             KeyCode::Enter if self.active_tab == Tab::Browse && self.waveform.is_some() => {
                 self.hierarchy_browser.toggle();
             }
+            // Toggle signal visibility for current scope
+            KeyCode::Char('s') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                if let Some(showing) = self.hierarchy_browser.toggle_show_signals() {
+                    let msg = if showing { "Signals shown" } else { "Signals hidden" };
+                    self.show_toast("", msg, Duration::from_secs(1));
+                }
+            }
+            // Open filter configuration popup
+            KeyCode::Char('f') if self.active_tab == Tab::Browse => {
+                self.filter_popup.open();
+            }
+            // Rebuild tree with current filter (Shift-R)
+            KeyCode::Char('R') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                self.hierarchy_browser.rebuild();
+                self.show_toast("", "Tree rebuilt", Duration::from_secs(1));
+            }
             _ => {}
         }
     }
@@ -507,13 +594,18 @@ impl App {
         self.render_tab_content(frame, chunks[2]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" q: quit | o: open | tab/1-4: switch tabs | s: screenshot")
+        let footer = Paragraph::new(" q: quit | o: open | f: filter | s: signals | R: rebuild | S: screenshot")
             .style(Style::default().reversed());
         frame.render_widget(footer, chunks[3]);
 
         // Render file picker on top if active
         if self.file_picker.active {
             self.file_picker.render(frame);
+        }
+
+        // Render filter popup on top if active
+        if self.filter_popup.active {
+            self.render_filter_popup(frame);
         }
 
         // Render popup on top if present
@@ -577,10 +669,12 @@ impl App {
             let hierarchy = waveform.hierarchy();
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(format!(" {} signals ", waveform.num_unique_signals()));
+                .padding(Padding::horizontal(1));
             self.hierarchy_browser.render(frame, area, hierarchy, block);
         } else {
-            let block = Block::default().borders(Borders::ALL);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .padding(Padding::horizontal(1));
             let inner = block.inner(area);
             frame.render_widget(block, area);
             let paragraph = Paragraph::new("No file loaded. Press 'o' to open.")
@@ -643,13 +737,13 @@ impl App {
         frame.render_widget(border, border_area);
     }
 
-    /// Render a centered popup
-    fn render_popup(&self, frame: &mut Frame, popup: &Popup) {
+    /// Render the filter configuration popup
+    fn render_filter_popup(&self, frame: &mut Frame) {
         let area = frame.area();
 
-        // Calculate popup size (50% width, auto height based on content)
-        let popup_width = (area.width / 2).max(40).min(area.width - 4);
-        let popup_height = 7; // title + border + message lines + padding
+        // Calculate popup size - needs to fit all scope types + actions
+        let popup_width = 50.min(area.width - 4);
+        let popup_height = (ALL_SCOPE_TYPES.len() as u16 + 7).min(area.height - 4); // +7 for header, separator, actions, border
 
         // Center the popup
         let popup_area = Rect {
@@ -659,6 +753,80 @@ impl App {
             height: popup_height,
         };
 
+        // Clear the area behind the popup
+        frame.render_widget(Clear, popup_area);
+
+        // Create the popup block
+        let block = Block::default()
+            .title(" Filter Config ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        // Build the list of items
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Header
+        lines.push(Line::from(Span::styled(
+            "Scope Types (Space/Enter to toggle):",
+            Style::default().bold(),
+        )));
+        lines.push(Line::from(""));
+
+        // Scope types with checkboxes
+        for (i, (scope_type, name, _desc)) in ALL_SCOPE_TYPES.iter().enumerate() {
+            let is_enabled = self.hierarchy_browser.filter().is_scope_enabled(*scope_type);
+            let checkbox = if is_enabled { "[x]" } else { "[ ]" };
+            let is_selected = self.filter_popup.selected == i;
+
+            let style = if is_selected {
+                Style::default().reversed()
+            } else {
+                Style::default()
+            };
+
+            lines.push(Line::from(Span::styled(
+                format!(" {} {}", checkbox, name),
+                style,
+            )));
+        }
+
+        // Separator
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("─".repeat(inner.width as usize - 2), Style::default().fg(Color::DarkGray))));
+
+        // Action buttons
+        let actions = ["Enable All", "Disable All", "Reset Default"];
+        for (i, action) in actions.iter().enumerate() {
+            let idx = ALL_SCOPE_TYPES.len() + i;
+            let is_selected = self.filter_popup.selected == idx;
+
+            let style = if is_selected {
+                Style::default().reversed()
+            } else {
+                Style::default().fg(Color::Yellow)
+            };
+
+            lines.push(Line::from(Span::styled(format!(" > {}", action), style)));
+        }
+
+        // Footer hint
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " Esc: close | R: rebuild tree",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, inner);
+    }
+
+    /// Render a centered popup
+    fn render_popup(&self, frame: &mut Frame, popup: &Popup) {
+        let area = frame.area();
+
         // Style based on level
         let (border_style, title_prefix) = match popup.level {
             PopupLevel::Info => (Style::default(), ""),
@@ -666,19 +834,35 @@ impl App {
             PopupLevel::Error => (Style::default().fg(Color::Red), "✗ "),
         };
 
+        // Calculate popup size based on content
+        let has_title = !popup.title.is_empty();
+        let content_width = popup.message.len() + 4; // message + padding
+        let popup_width = (content_width as u16).max(20).min(area.width - 4);
+        let popup_height = if has_title { 5 } else { 3 }; // compact for toasts
+
+        // Center the popup
+        let popup_area = Rect {
+            x: (area.width - popup_width) / 2,
+            y: (area.height - popup_height) / 2,
+            width: popup_width,
+            height: popup_height,
+        };
+
         // Clear the area behind the popup
         frame.render_widget(Clear, popup_area);
 
-        // Create the popup block with padding
-        let block = Block::default()
-            .title(format!(" {}{} ", title_prefix, popup.title))
+        // Create the popup block - only add title if non-empty
+        let mut block = Block::default()
             .borders(Borders::ALL)
-            .border_style(border_style)
-            .padding(Padding::new(2, 2, 1, 1)); // left, right, top, bottom
+            .border_style(border_style);
+
+        if has_title {
+            block = block.title(format!(" {}{} ", title_prefix, popup.title));
+        }
 
         // Create the message paragraph
         let message = Paragraph::new(popup.message.as_str())
-            .wrap(Wrap { trim: false })
+            .alignment(Alignment::Center)
             .block(block);
 
         frame.render_widget(message, popup_area);
