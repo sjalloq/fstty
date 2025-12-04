@@ -1,12 +1,15 @@
 //! Application state and lifecycle - Minimal TUI
 
 use std::io;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
+
+use crate::file_picker::FilePicker;
 
 /// Popup message level
 #[derive(Clone)]
@@ -31,15 +34,22 @@ pub struct App {
     exit: bool,
     /// Popup message (dismisses on any key)
     popup: Option<Popup>,
+    /// File picker
+    file_picker: FilePicker,
+    /// Currently loaded file
+    loaded_file: Option<PathBuf>,
 }
 
 impl App {
     /// Create a new application
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        let file_picker = FilePicker::new(".")?;
+        Ok(Self {
             exit: false,
             popup: None,
-        }
+            file_picker,
+            loaded_file: None,
+        })
     }
 
     /// Show an info popup
@@ -105,7 +115,7 @@ impl App {
     }
 
     /// Render a single frame to string (for screenshots/testing)
-    pub fn screenshot(&self, width: u16, height: u16) -> String {
+    pub fn screenshot(&mut self, width: u16, height: u16) -> String {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
@@ -165,9 +175,49 @@ impl App {
 
     /// Handle a key press
     fn handle_key(&mut self, code: KeyCode) {
-        // Screenshot always works, even with popup
+        // Screenshot always works
         if matches!(code, KeyCode::Char('s') | KeyCode::Char('S')) {
             self.save_screenshot();
+            return;
+        }
+
+        // File picker has priority when active
+        if self.file_picker.active {
+            match code {
+                KeyCode::Esc => {
+                    self.file_picker.close();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.file_picker.up();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.file_picker.down();
+                }
+                KeyCode::Enter | KeyCode::Char('l') => {
+                    match self.file_picker.select() {
+                        Ok(Some(path)) => {
+                            self.loaded_file = Some(path.clone());
+                            self.file_picker.close();
+                            self.show_toast(
+                                "Opened",
+                                format!("{}", path.display()),
+                                Duration::from_secs(2),
+                            );
+                        }
+                        Ok(None) => {} // Navigated into directory
+                        Err(e) => {
+                            self.show_error("Error", format!("Failed to open: {}", e));
+                        }
+                    }
+                }
+                KeyCode::Backspace | KeyCode::Char('h') => {
+                    // Go to parent directory
+                    if let Err(e) = self.file_picker.select() {
+                        self.show_error("Error", format!("{}", e));
+                    }
+                }
+                _ => {}
+            }
             return;
         }
 
@@ -179,19 +229,20 @@ impl App {
             return;
         }
 
+        // Normal key handling
         match code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.exit = true;
             }
             KeyCode::Char('o') | KeyCode::Char('O') => {
-                self.show_info("Open", "File browser not yet implemented.\n\nPress Esc to dismiss.");
+                self.file_picker.open();
             }
             _ => {}
         }
     }
 
     /// Render the application
-    fn render(&self, frame: &mut Frame) {
+    fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
         // Layout: main area + footer
@@ -203,14 +254,26 @@ impl App {
             ])
             .split(area);
 
-        // Main content area - empty for now
-        let main_content = Paragraph::new("");
+        // Main content area - show loaded file or placeholder
+        let main_text = if let Some(ref path) = self.loaded_file {
+            format!("Loaded: {}", path.display())
+        } else {
+            "No file loaded. Press 'o' to open.".to_string()
+        };
+        let main_content = Paragraph::new(main_text)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title(" fstty "));
         frame.render_widget(main_content, chunks[0]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" q: Quit | o: Open | s: Screenshot")
+        let footer = Paragraph::new(" q: quit | o: open | s: screenshot")
             .style(Style::default().reversed());
         frame.render_widget(footer, chunks[1]);
+
+        // Render file picker on top if active
+        if self.file_picker.active {
+            self.file_picker.render(frame);
+        }
 
         // Render popup on top if present
         if let Some(ref popup) = self.popup {

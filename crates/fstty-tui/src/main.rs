@@ -42,7 +42,7 @@ fn main() -> Result<()> {
             .init();
     }
 
-    let mut app = App::new();
+    let mut app = App::new()?;
 
     // Screenshot mode - render one frame and exit
     if args.screenshot {
