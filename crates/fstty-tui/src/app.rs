@@ -11,6 +11,48 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
 
 use crate::file_picker::FilePicker;
 
+/// Available tabs/tools
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Tab {
+    #[default]
+    Browse,
+    Convert,
+    Filter,
+    Analyze,
+}
+
+impl Tab {
+    pub const ALL: &'static [Tab] = &[Tab::Browse, Tab::Convert, Tab::Filter, Tab::Analyze];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Tab::Browse => "Browse",
+            Tab::Convert => "Convert",
+            Tab::Filter => "Filter",
+            Tab::Analyze => "Analyze",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        match self {
+            Tab::Browse => 0,
+            Tab::Convert => 1,
+            Tab::Filter => 2,
+            Tab::Analyze => 3,
+        }
+    }
+
+    pub fn from_index(idx: usize) -> Self {
+        match idx {
+            0 => Tab::Browse,
+            1 => Tab::Convert,
+            2 => Tab::Filter,
+            3 => Tab::Analyze,
+            _ => Tab::Browse,
+        }
+    }
+}
+
 /// Popup message level
 #[derive(Clone)]
 pub enum PopupLevel {
@@ -75,6 +117,8 @@ pub struct App {
     spinner: Spinner,
     /// Current busy status message (None = not busy)
     busy_status: Option<String>,
+    /// Active tab
+    active_tab: Tab,
 }
 
 impl App {
@@ -88,7 +132,24 @@ impl App {
             loaded_file: None,
             spinner: Spinner::new(),
             busy_status: None,
+            active_tab: Tab::default(),
         })
+    }
+
+    /// Switch to next tab
+    fn next_tab(&mut self) {
+        let idx = (self.active_tab.index() + 1) % Tab::ALL.len();
+        self.active_tab = Tab::from_index(idx);
+    }
+
+    /// Switch to previous tab
+    fn prev_tab(&mut self) {
+        let idx = if self.active_tab.index() == 0 {
+            Tab::ALL.len() - 1
+        } else {
+            self.active_tab.index() - 1
+        };
+        self.active_tab = Tab::from_index(idx);
     }
 
     /// Set busy status (shows spinner)
@@ -104,6 +165,17 @@ impl App {
     /// Set loaded file (for testing/screenshots)
     pub fn set_loaded_file(&mut self, path: PathBuf) {
         self.loaded_file = Some(path);
+    }
+
+    /// Set active tab by name or number (for testing/screenshots)
+    pub fn set_tab(&mut self, tab: &str) {
+        self.active_tab = match tab.to_lowercase().as_str() {
+            "1" | "browse" => Tab::Browse,
+            "2" | "convert" => Tab::Convert,
+            "3" | "filter" => Tab::Filter,
+            "4" | "analyze" => Tab::Analyze,
+            _ => Tab::Browse,
+        };
     }
 
     /// Show an info popup
@@ -296,6 +368,16 @@ impl App {
             KeyCode::Char('o') | KeyCode::Char('O') => {
                 self.file_picker.open();
             }
+            KeyCode::Tab => {
+                self.next_tab();
+            }
+            KeyCode::BackTab => {
+                self.prev_tab();
+            }
+            KeyCode::Char('1') => self.active_tab = Tab::Browse,
+            KeyCode::Char('2') => self.active_tab = Tab::Convert,
+            KeyCode::Char('3') => self.active_tab = Tab::Filter,
+            KeyCode::Char('4') => self.active_tab = Tab::Analyze,
             _ => {}
         }
     }
@@ -304,11 +386,12 @@ impl App {
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
-        // Layout: title bar (2 rows) + main area + footer
+        // Layout: title bar (2 rows) + tabs + main area + footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(2), // Title bar + separator
+                Constraint::Length(1), // Tab bar
                 Constraint::Min(1),    // Main content
                 Constraint::Length(1), // Footer
             ])
@@ -317,25 +400,16 @@ impl App {
         // Title bar: "fstty" left, status right
         self.render_title_bar(frame, chunks[0]);
 
-        // Main content area - show loaded file or placeholder
-        if self.loaded_file.is_some() {
-            // Will show hierarchy tree etc. later
-            let main_content = Paragraph::new("")
-                .block(Block::default().borders(Borders::ALL));
-            frame.render_widget(main_content, chunks[1]);
-        } else {
-            // Empty state
-            let main_text = "No file loaded. Press 'o' to open.";
-            let main_content = Paragraph::new(main_text)
-                .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL));
-            frame.render_widget(main_content, chunks[1]);
-        }
+        // Tab bar
+        self.render_tabs(frame, chunks[1]);
+
+        // Main content area - depends on active tab
+        self.render_tab_content(frame, chunks[2]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" q: quit | o: open | s: screenshot")
+        let footer = Paragraph::new(" q: quit | o: open | tab/1-4: switch tabs | s: screenshot")
             .style(Style::default().reversed());
-        frame.render_widget(footer, chunks[2]);
+        frame.render_widget(footer, chunks[3]);
 
         // Render file picker on top if active
         if self.file_picker.active {
@@ -346,6 +420,52 @@ impl App {
         if let Some(ref popup) = self.popup {
             self.render_popup(frame, popup);
         }
+    }
+
+    /// Render tab bar
+    fn render_tabs(&self, frame: &mut Frame, area: Rect) {
+        let mut spans = Vec::new();
+        spans.push(Span::raw(" "));
+
+        for (i, tab) in Tab::ALL.iter().enumerate() {
+            let label = format!(" {} ", tab.label());
+            let style = if *tab == self.active_tab {
+                Style::default().bold().reversed()
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            spans.push(Span::styled(label, style));
+
+            // Add separator between tabs
+            if i < Tab::ALL.len() - 1 {
+                spans.push(Span::raw(" "));
+            }
+        }
+
+        let tabs = Paragraph::new(Line::from(spans));
+        frame.render_widget(tabs, area);
+    }
+
+    /// Render content for the active tab
+    fn render_tab_content(&self, frame: &mut Frame, area: Rect) {
+        let content = match self.active_tab {
+            Tab::Browse => {
+                if self.loaded_file.is_some() {
+                    // Will show hierarchy tree later
+                    "Hierarchy tree will go here"
+                } else {
+                    "No file loaded. Press 'o' to open."
+                }
+            }
+            Tab::Convert => "VCD → FST conversion tools",
+            Tab::Filter => "Signal filtering and time windowing",
+            Tab::Analyze => "Analysis plugins and queries",
+        };
+
+        let paragraph = Paragraph::new(content)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(paragraph, area);
     }
 
     /// Render title bar with app name and status

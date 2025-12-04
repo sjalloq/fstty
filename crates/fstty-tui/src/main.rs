@@ -32,6 +32,10 @@ struct Args {
     /// Simulate loaded file in screenshot
     #[arg(long, value_name = "FILENAME")]
     file: Option<String>,
+
+    /// Set active tab in screenshot (1-4 or name)
+    #[arg(long, value_name = "TAB")]
+    tab: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -67,6 +71,9 @@ fn main() -> Result<()> {
         }
         if let Some(filename) = args.file {
             app.set_loaded_file(std::path::PathBuf::from(filename));
+        }
+        if let Some(tab) = args.tab {
+            app.set_tab(&tab);
         }
         println!("{}", app.screenshot(80, 20));
         return Ok(());
