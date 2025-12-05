@@ -565,6 +565,18 @@ impl App {
                 self.hierarchy_browser.rebuild();
                 self.show_toast("", "Tree rebuilt", Duration::from_secs(1));
             }
+            // Toggle selection of current item (Space)
+            KeyCode::Char(' ') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
+                if let Some(selected) = self.hierarchy_browser.toggle_selection() {
+                    let count = self.hierarchy_browser.selection_count();
+                    let msg = if selected {
+                        format!("Selected ({} total)", count)
+                    } else {
+                        format!("Deselected ({} total)", count)
+                    };
+                    self.show_toast("", msg, Duration::from_secs(1));
+                }
+            }
             _ => {}
         }
     }
@@ -594,7 +606,7 @@ impl App {
         self.render_tab_content(frame, chunks[2]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" q: quit | o: open | f: filter | s: signals | R: rebuild | S: screenshot")
+        let footer = Paragraph::new(" q: quit | o: open | f: filter | s: signals | Space: select | R: rebuild")
             .style(Style::default().reversed());
         frame.render_widget(footer, chunks[3]);
 
@@ -703,11 +715,16 @@ impl App {
             (" fstty".to_string(), None)
         };
 
-        // Right side: spinner + status message
+        // Right side: spinner + status message OR selection count
         let status = if let Some(ref busy_msg) = self.busy_status {
             format!("{} {} ", self.spinner.frame(), busy_msg)
         } else {
-            String::new()
+            let count = self.hierarchy_browser.selection_count();
+            if count > 0 {
+                format!("[{} selected] ", count)
+            } else {
+                String::new()
+            }
         };
 
         // Calculate widths

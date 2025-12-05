@@ -154,6 +154,8 @@ pub struct HierarchyBrowser {
     expanded: HashSet<NodeId>,
     /// Scopes where signals should be shown (toggled with 's')
     show_signals: HashSet<NodeId>,
+    /// Selected signals/scopes for export (toggled with Space)
+    selected_for_export: HashSet<NodeId>,
     /// Filter configuration
     filter: FilterConfig,
 }
@@ -165,6 +167,7 @@ impl HierarchyBrowser {
             state: TreeState::default(),
             expanded: HashSet::new(),
             show_signals: HashSet::new(),
+            selected_for_export: HashSet::new(),
             filter: FilterConfig::default(),
         }
     }
@@ -174,6 +177,7 @@ impl HierarchyBrowser {
         self.state = TreeState::default();
         self.expanded.clear();
         self.show_signals.clear();
+        self.selected_for_export.clear();
         // Keep filter config - user probably wants same settings for new file
     }
 
@@ -208,6 +212,37 @@ impl HierarchyBrowser {
     /// Check if a scope has signal visibility enabled
     pub fn is_showing_signals(&self, node_id: &NodeId) -> bool {
         self.show_signals.contains(node_id)
+    }
+
+    /// Toggle selection of the currently highlighted node for export
+    /// Returns Some(true) if now selected, Some(false) if deselected, None if nothing selected
+    pub fn toggle_selection(&mut self) -> Option<bool> {
+        if let Some(node_id) = self.selected() {
+            if self.selected_for_export.contains(&node_id) {
+                self.selected_for_export.remove(&node_id);
+                Some(false)
+            } else {
+                self.selected_for_export.insert(node_id);
+                Some(true)
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Check if a node is selected for export
+    pub fn is_selected_for_export(&self, node_id: &NodeId) -> bool {
+        self.selected_for_export.contains(node_id)
+    }
+
+    /// Get count of selected items
+    pub fn selection_count(&self) -> usize {
+        self.selected_for_export.len()
+    }
+
+    /// Clear all selections
+    pub fn clear_selection(&mut self) {
+        self.selected_for_export.clear();
     }
 
     /// Get mutable access to the filter config
@@ -306,13 +341,13 @@ impl HierarchyBrowser {
 
         // Check if signals should be shown for this scope
         let show_signals_here = self.show_signals.contains(&node_id);
+        // Check if selected for export
+        let is_selected = self.selected_for_export.contains(&node_id);
 
-        // Format label - add indicator if showing signals
-        let label = if show_signals_here {
-            format!("{} ({:?}) *", name, scope_type)
-        } else {
-            format!("{} ({:?})", name, scope_type)
-        };
+        // Format label - add indicators
+        let selected_marker = if is_selected { "● " } else { "" };
+        let signals_marker = if show_signals_here { " *" } else { "" };
+        let label = format!("{}{} ({:?}){}", selected_marker, name, scope_type, signals_marker);
 
         // Check if this scope has visible children
         let has_child_scopes = scope.scopes(hierarchy)
@@ -372,6 +407,11 @@ impl HierarchyBrowser {
         let name = var.name(hierarchy);
         let width = var.length().map(|l| l.to_string()).unwrap_or_default();
         let direction = var.direction();
+        let node_id = NodeId::from_var(var_ref);
+
+        // Check if selected for export
+        let is_selected = self.selected_for_export.contains(&node_id);
+        let selected_marker = if is_selected { "● " } else { "" };
 
         // Format: "name [width]" with direction indicator
         let dir_indicator = match direction {
@@ -382,12 +422,12 @@ impl HierarchyBrowser {
         };
 
         let label = if width.is_empty() {
-            format!("{} {}", dir_indicator, name)
+            format!("{}{} {}", selected_marker, dir_indicator, name)
         } else {
-            format!("{} {} [{}]", dir_indicator, name, width)
+            format!("{}{} {} [{}]", selected_marker, dir_indicator, name, width)
         };
 
-        Some(TreeItem::new_leaf(NodeId::from_var(var_ref), label))
+        Some(TreeItem::new_leaf(node_id, label))
     }
 
     /// Render the hierarchy browser
