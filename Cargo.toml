@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
     "crates/fstty-core",
-    "crates/fstty-dataframe",
-    "crates/fstty-plugins",
+    # "crates/fstty-dataframe",
+    # "crates/fstty-plugins",
     "crates/fstty-tui",
 ]
 
