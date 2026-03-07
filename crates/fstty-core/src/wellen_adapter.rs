@@ -138,7 +138,7 @@ mod tests {
     use wellen::{LoadOptions, viewers};
 
     /// Small test FST file for fast tests.
-    const TEST_FST: &str = "/home/sjalloq/Work/fst-reader/fsts/icarus/rv32_soc_TB.vcd.fst";
+    const TEST_FST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rv32_soc_TB.vcd.fst");
 
     fn load_wellen_hierarchy(path: &str) -> wellen::Hierarchy {
         let opts = LoadOptions::default();

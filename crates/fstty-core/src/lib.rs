@@ -25,7 +25,7 @@ pub use writer::FilteredFstWriter;
 mod fst_reader_smoke_tests {
     use std::io::BufReader;
 
-    const TEST_FST: &str = "/home/sjalloq/Work/fst-reader/fsts/icarus/rv32_soc_TB.vcd.fst";
+    const TEST_FST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rv32_soc_TB.vcd.fst");
 
     #[test]
     fn open_fst_and_read_header() {

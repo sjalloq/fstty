@@ -2,7 +2,7 @@
 
 TDD-aligned, self-contained steps derived from `PRD.md`. Each step compiles and passes tests independently.
 
-Test FST files are available at `/home/sjalloq/Work/fst-reader/fsts/`. Do NOT use root-level FST files (e.g. `waves.fst`) for tests — they contain proprietary data.
+Test FST fixtures are in `crates/fstty-core/tests/fixtures/`. Do NOT use root-level FST files (e.g. `waves.fst`) for tests — they contain proprietary data.
 
 ---
 
@@ -375,3 +375,29 @@ All changes, decisions, and issues are logged below as work progresses.
 - Uses `FstReader::open_and_read_time_table()` for efficient time-range filtering
 - Time range conversion: WaveformSource uses `Range<u64>` (exclusive end), fst-reader uses inclusive — adjusted with `saturating_sub(1)`
 - Empty time ranges short-circuit without calling fst-reader
+
+#### STEP-7: FstSource — block info and export — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/fst/export.rs`: created with `BlockInfo`, `ExportConfig`, `ExportResult` types and `block_infos()` / `export_filtered()` methods on `FstSource`
+- `crates/fstty-core/src/fst/mod.rs`: added `pub mod export;`, re-exports `BlockInfo`, `ExportConfig`, `ExportResult`
+- `crates/fstty-core/src/fst/source.rs`: changed `FstSource` field visibility to `pub(crate)` so export.rs can access them
+- `fst-reader/src/io.rs`: fixed `skip_frame` to handle uncompressed frames (`compressed_length == 0`)
+
+**Tests added**:
+- `block_infos_nonzero`: verify block count > 0
+- `block_infos_times_non_overlapping`: verify block time ranges are ordered and non-overlapping
+- `export_filtered_creates_file`: export 1 signal, verify output file exists and result metadata
+- `export_roundtrip_signal_count`: export 2 signals, open with fst-reader, verify signal count matches
+- `export_roundtrip_values_match`: read signal values from source and exported file, verify they match exactly
+
+**Issues**:
+- fst-reader's `skip_frame` had a bug: when a frame is stored uncompressed (`compressed_length == 0`), it skipped 0 bytes instead of `uncompressed_length` bytes. This caused `read_value_changes` to read wrong bytes as the pack type, triggering a `debug_assert` failure. Fixed in fst-reader.
+
+**Decisions**:
+- Uses `FstRawWriter` from fst-writer for output (handles header, geometry, hierarchy block writing and header fixup)
+- Hierarchy is re-read from fst-reader and filtered (lazy scope emission: parent scopes only written when a kept variable is encountered)
+- Signal data is copied raw (no decompression) with deduplication: aliased signals sharing the same compressed blob are written once
+- `FstSource` fields changed to `pub(crate)` to allow the export module to access them

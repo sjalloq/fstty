@@ -14,7 +14,15 @@
 ## Test data
 
 - Do NOT use FST files in the repo root (e.g. `waves.fst`) for tests.
-- Use the test FST files in `http://github.com/sjalloq/fst-reader/fsts/` instead (many small examples from various simulators).
+- Use the local test fixtures in `crates/fstty-core/tests/fixtures/` (copied from fst-reader, covering different encodings).
+- Reference fixtures with `concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/<file>.fst")`.
+- Available fixtures and their encoding coverage:
+  - `rv32_soc_TB.vcd.fst` — LZ4 + DynamicAlias2 (common case, Icarus Verilog)
+  - `des.fst` — Zlib + DynamicAlias (GTKWave)
+  - `transaction.fst` — Zlib + Standard block kind (GTKWave)
+  - `waveform.vcd.fastlz.fst` — FastLZ compression (SystemC)
+  - `multi_vc_block.fst` — multiple VC blocks (fst-writer generated)
+  - `sigmoid_tb.vcd.fst` — real (floating point) signals (MyHDL)
 
 ## Build and test
 
@@ -29,6 +37,7 @@ cargo clippy                 # lint
 
 - Commit changes to `fst-reader` and `fst-writer` repos and push to GitHub.
   - `fst-reader`: added `Eq` and `Hash` derives to `FstSignalHandle` (needed for use as HashMap key in fstty-core).
+  - `fst-reader`: fixed `skip_frame` in `io.rs` to handle uncompressed frames (`compressed_length == 0`).
 - Update `Cargo.toml` workspace dependencies to point to GitHub repos instead of local paths (`../fst-reader`, `../fst-writer`).
 
 ## Repo layout

@@ -20,11 +20,11 @@ use crate::wellen_adapter::build_hierarchy_from_wellen;
 /// Opens the file twice: once with wellen (for hierarchy) and once with
 /// fst-reader (for signal data). A `signal_map` bridges the two ID spaces.
 pub struct FstSource {
-    hierarchy: Hierarchy,
-    metadata: WaveformMetadata,
-    reader: FstReader<BufReader<std::fs::File>>,
+    pub(crate) hierarchy: Hierarchy,
+    pub(crate) metadata: WaveformMetadata,
+    pub(crate) reader: FstReader<BufReader<std::fs::File>>,
     /// Maps `SignalId` → `FstSignalHandle` (bridges wellen and fst-reader ID spaces).
-    signal_map: HashMap<SignalId, FstSignalHandle>,
+    pub(crate) signal_map: HashMap<SignalId, FstSignalHandle>,
 }
 
 impl FstSource {
@@ -154,7 +154,7 @@ impl WaveformSource for FstSource {
 mod tests {
     use super::*;
 
-    const TEST_FST: &str = "/home/sjalloq/Work/fst-reader/fsts/icarus/rv32_soc_TB.vcd.fst";
+    const TEST_FST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rv32_soc_TB.vcd.fst");
 
     #[test]
     fn open_and_metadata() {

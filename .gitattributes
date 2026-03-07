@@ -1,0 +1,1 @@
+crates/fstty-core/tests/fixtures/*.fst filter=lfs diff=lfs merge=lfs -text
