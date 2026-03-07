@@ -6,7 +6,7 @@ use wellen::SignalRef;
 
 use crate::error::{Error, Result};
 use crate::filter::SignalSelection;
-use crate::waveform::WaveformFile;
+use crate::waveform_legacy::WaveformFile;
 
 /// Progress information during FST writing
 #[derive(Debug, Clone)]

@@ -8,10 +8,12 @@ pub mod hierarchy;
 pub mod hierarchy_legacy;
 pub mod types;
 pub mod waveform;
+pub mod waveform_legacy;
 pub mod writer;
 
 pub use error::{Error, Result};
 pub use filter::{FilterPattern, SignalSelection};
 pub use hierarchy_legacy::{HierarchyNavigator, HierarchyNode};
-pub use waveform::{WaveformFile, WaveformFormat};
+pub use waveform::WaveformSource;
+pub use waveform_legacy::{WaveformFile, WaveformFormat};
 pub use writer::FilteredFstWriter;

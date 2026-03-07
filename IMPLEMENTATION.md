@@ -280,3 +280,27 @@ All changes, decisions, and issues are logged below as work progresses.
 - Old hierarchy code moved to `hierarchy_legacy.rs` to coexist (TUI still depends on wellen types until Step 8)
 - Glob `*` matches dots in signal paths (e.g. `top.*` matches `top.sub.data`) — standard glob behavior since paths use `.` not `/` as separator
 - `HierarchyBuilder` tracks unique signals via `HashSet<SignalId>` for correct `signal_count()` with aliases
+
+#### STEP-3: WaveformSource trait and error types — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/waveform.rs`: replaced with `WaveformSource` trait definition
+- `crates/fstty-core/src/waveform_legacy.rs`: old `WaveformFile`/`WaveformFormat` preserved here for TUI compatibility
+- `crates/fstty-core/src/lib.rs`: added `pub mod waveform_legacy;`, re-exports updated (`WaveformSource` from new module, `WaveformFile`/`WaveformFormat` from legacy)
+- `crates/fstty-core/src/writer.rs`: updated import to `waveform_legacy`
+
+**Tests added**:
+- `object_safe`: verifies `Box<dyn WaveformSource>` compiles, metadata and hierarchy accessible through trait object
+- `mock_read_signals_all`: TestSource with canned data, read all signals over full range, verify all 6 changes received
+- `mock_read_signals_time_filter`: verify time range filtering (only changes in 10..25)
+- `mock_read_signals_signal_filter`: verify signal filtering (only signal 1)
+- `mock_via_trait_object`: verify `read_signals` works through `Box<dyn WaveformSource>` dynamic dispatch
+
+**Issues**: none
+
+**Decisions**:
+- Same legacy-module pattern as Step 2: old waveform code moved to `waveform_legacy.rs` to coexist until TUI migration in Step 8
+- Error types (`error.rs`) unchanged — existing variants are sufficient for the trait
+- `WaveformSource::read_signals` takes `Range<u64>` for time filtering, matching PRD spec
