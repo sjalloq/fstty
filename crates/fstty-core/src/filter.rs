@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use wellen::{Hierarchy, ScopeRef, SignalRef, VarRef};
 
 use crate::error::{Error, Result};
-use crate::hierarchy::HierarchyNavigator;
+use crate::hierarchy_legacy::HierarchyNavigator;
 
 /// Represents a filter pattern for signals
 #[derive(Debug, Clone)]

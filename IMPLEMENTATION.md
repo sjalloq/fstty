@@ -246,3 +246,37 @@ All changes, decisions, and issues are logged below as work progresses.
 **Decisions**:
 - ID inner fields are `pub(crate)` so backends can construct them but TUI cannot
 - Enum variants based on FST/VCD spec coverage (12 scope types, 22 var types, 6 directions)
+
+#### STEP-2: Hierarchy struct and HierarchyBuilder — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/hierarchy.rs`: replaced with new `Hierarchy`, `HierarchyBuilder`, `HierarchyEvent` using fstty-core's own types
+- `crates/fstty-core/src/hierarchy_legacy.rs`: old wellen-based `HierarchyNavigator`/`HierarchyNode`/`VisibleNodeIterator` preserved here for TUI compatibility
+- `crates/fstty-core/src/lib.rs`: added `pub mod hierarchy_legacy;`, re-exports point to legacy module
+- `crates/fstty-core/src/filter.rs`: updated import to `hierarchy_legacy`
+- `crates/fstty-tui/src/components/tree.rs`: updated import to `hierarchy_legacy`
+
+**Tests added** (all pure, no file I/O):
+- `top_scopes`: verify top-level scope returned correctly
+- `scope_children`: verify child scopes
+- `scope_vars`: verify vars in a scope
+- `scope_parent`: verify parent/None for top-level
+- `scope_name_and_type`: verify name and ScopeType
+- `scope_full_path`: verify dotted path construction
+- `var_metadata`: verify name, width, type, direction, signal_id
+- `var_full_path`: verify dotted path for vars
+- `find_vars_glob`: glob matching on full paths
+- `find_vars_invalid_pattern`: invalid glob returns empty
+- `counts`: scope_count, var_count, signal_count
+- `deep_nesting`: 4-level deep hierarchy, verify full path
+- `alias_same_signal_id`: two vars with same SignalId, signal_count=1
+- `empty_hierarchy`: empty builder produces empty hierarchy
+
+**Issues**: none
+
+**Decisions**:
+- Old hierarchy code moved to `hierarchy_legacy.rs` to coexist (TUI still depends on wellen types until Step 8)
+- Glob `*` matches dots in signal paths (e.g. `top.*` matches `top.sub.data`) — standard glob behavior since paths use `.` not `/` as separator
+- `HierarchyBuilder` tracks unique signals via `HashSet<SignalId>` for correct `signal_count()` with aliases
