@@ -530,3 +530,30 @@ All changes, decisions, and issues are logged below as work progresses.
 **Decisions**:
 - Added `SignalId::from_raw()` as a public constructor so external crates can build test hierarchies via `HierarchyBuilder` without needing `pub(crate)` access to the inner field
 - Visual propagation uses `ancestor_recursive` parameter threaded through tree building — no stored state needed
+
+#### STEP-11: Clean up old code — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- Deleted `crates/fstty-core/src/writer.rs` — placeholder writer, replaced by `fst/export.rs`
+- Deleted `crates/fstty-core/src/filter.rs` — old `SignalSelection`/`FilterPattern` using wellen types, no longer referenced
+- Deleted `crates/fstty-core/src/hierarchy_legacy.rs` — old wellen-based `HierarchyNavigator`/`VisibleNodeIterator`, replaced by `hierarchy.rs`
+- Deleted `crates/fstty-core/src/waveform_legacy.rs` — old wellen-based `WaveformFile`/`WaveformFormat`, replaced by `waveform.rs`
+- Deleted `crates/fstty-core/examples/load_hierarchy.rs` — used wellen directly
+- Deleted `crates/fstty-tui/src/components/` directory (`tree.rs`, `status.rs`, `mod.rs`) — dead code, not in TUI module tree
+- `crates/fstty-core/src/lib.rs`: removed `pub mod filter`, `pub mod hierarchy_legacy`, `pub mod waveform_legacy`, `pub mod writer` and their re-exports (`FilterPattern`, `SignalSelection`, `HierarchyNavigator`, `HierarchyNode`, `WaveformFile`, `WaveformFormat`, `FilteredFstWriter`)
+- `crates/fstty-core/Cargo.toml`: removed `fstapi` dependency
+- `Cargo.toml` (workspace): removed `fstapi` from workspace dependencies
+
+**Tests**:
+- `cargo build` succeeds (clean)
+- `cargo test` passes: 47 fstty-core tests + 32 fstty-tui tests (79 total)
+- `cargo clippy` clean (no warnings)
+- Grep confirms zero references to removed modules/types in crate sources
+
+**Issues**: none
+
+**Decisions**:
+- `error.rs` left as-is — all error variants (`FstWrite`, `InvalidPattern`, etc.) are still used or may be used by remaining code
+- `fstapi` fully removed since `writer.rs` was the only consumer and `fst/export.rs` uses `fst-writer` instead

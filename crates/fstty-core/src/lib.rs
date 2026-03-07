@@ -3,29 +3,22 @@
 //! This crate provides the foundation for loading and manipulating FST/VCD waveform files.
 
 pub mod error;
-pub mod filter;
 pub mod fst;
 pub mod hierarchy;
-pub mod hierarchy_legacy;
 pub mod types;
 pub mod waveform;
-pub mod waveform_legacy;
 pub mod wellen_adapter;
-pub mod writer;
 
 pub use error::{Error, Result};
-pub use filter::{FilterPattern, SignalSelection};
 pub use fst::FstSource;
-pub use hierarchy_legacy::{HierarchyNavigator, HierarchyNode};
 pub use waveform::WaveformSource;
-pub use waveform_legacy::{WaveformFile, WaveformFormat};
-pub use writer::FilteredFstWriter;
 
 #[cfg(test)]
 mod fst_reader_smoke_tests {
     use std::io::BufReader;
 
-    const TEST_FST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rv32_soc_TB.vcd.fst");
+    const TEST_FST: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rv32_soc_TB.vcd.fst");
 
     #[test]
     fn open_fst_and_read_header() {

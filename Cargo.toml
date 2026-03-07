@@ -17,7 +17,6 @@ repository = "https://github.com/sjalloq/fstty-rs"
 [workspace.dependencies]
 # Waveform parsing and writing
 wellen = "0.19"
-fstapi = "0.0.3"
 fst-reader = { path = "../fst-reader" }
 fst-writer = { path = "../fst-writer" }
 

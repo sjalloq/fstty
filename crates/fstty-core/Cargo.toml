@@ -8,7 +8,6 @@ license.workspace = true
 
 [dependencies]
 wellen = { workspace = true }
-fstapi = { workspace = true }
 fst-reader = { workspace = true }
 fst-writer = { workspace = true }
 thiserror = { workspace = true }
