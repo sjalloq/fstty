@@ -9,6 +9,7 @@ pub mod hierarchy_legacy;
 pub mod types;
 pub mod waveform;
 pub mod waveform_legacy;
+pub mod wellen_adapter;
 pub mod writer;
 
 pub use error::{Error, Result};

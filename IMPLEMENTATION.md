@@ -2,7 +2,7 @@
 
 TDD-aligned, self-contained steps derived from `PRD.md`. Each step compiles and passes tests independently.
 
-Test FST files are available at `/home/sjalloq/Work/fst-reader/fsts/` and `./waves.fst`.
+Test FST files are available at `/home/sjalloq/Work/fst-reader/fsts/`. Do NOT use root-level FST files (e.g. `waves.fst`) for tests — they contain proprietary data.
 
 ---
 
@@ -304,3 +304,30 @@ All changes, decisions, and issues are logged below as work progresses.
 - Same legacy-module pattern as Step 2: old waveform code moved to `waveform_legacy.rs` to coexist until TUI migration in Step 8
 - Error types (`error.rs`) unchanged — existing variants are sufficient for the trait
 - `WaveformSource::read_signals` takes `Range<u64>` for time filtering, matching PRD spec
+
+#### STEP-4: Wellen hierarchy adapter — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/wellen_adapter.rs`: created with `build_hierarchy_from_wellen()` function that walks wellen's hierarchy arena and emits `HierarchyEvent`s into `HierarchyBuilder`
+- `crates/fstty-core/src/lib.rs`: added `pub mod wellen_adapter;`
+
+**Tests added** (all use a small FST file: `fst-reader/fsts/icarus/rv32_soc_TB.vcd.fst`):
+- `scope_count_nonzero`: verify converted hierarchy has scopes
+- `var_count_nonzero`: verify converted hierarchy has vars
+- `top_scope_name`: verify top-level scope has a non-empty name
+- `scope_type_is_module`: verify top-level scope type is Module (Verilog)
+- `var_full_path_is_dotted`: verify at least one var has a dotted hierarchical path
+- `signal_count_matches_wellen`: verify our `signal_count()` equals wellen's `num_unique_signals()`
+- `scope_full_path_matches_wellen`: verify top-level scope full paths match between wellen and our hierarchy
+
+**Issues**: none
+
+**Decisions**:
+- Uses `scope.items()` iterator for correct declaration-order traversal (scopes and vars interleaved), not separate `scopes()`/`vars()` iterators
+- VHDL scope types (VhdlArchitecture, etc.) map to `ScopeType::Module` as a reasonable default
+- VHDL var types (Boolean, StdLogic, etc.) map to closest VarType equivalent (Logic, Integer)
+- wellen's `VarDirection::Unknown` maps to `VarDirection::Implicit`
+- Signal width: BitVector uses its length, Real→64, String→0
+- `is_alias` always false; `HierarchyBuilder` deduplicates via `SignalId` in its `HashSet`

@@ -11,6 +11,11 @@
 - No fst-reader types in fstty-tui. The TUI only sees fstty-core's public API.
 - Do not make architectural changes without updating the PRD first.
 
+## Test data
+
+- Do NOT use FST files in the repo root (e.g. `waves.fst`) for tests.
+- Use the test FST files in `http://github.com/sjalloq/fst-reader/fsts/` instead (many small examples from various simulators).
+
 ## Build and test
 
 ```sh
