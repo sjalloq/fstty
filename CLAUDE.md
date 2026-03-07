@@ -28,6 +28,7 @@ cargo clippy                 # lint
 ## TODO: Before release
 
 - Commit changes to `fst-reader` and `fst-writer` repos and push to GitHub.
+  - `fst-reader`: added `Eq` and `Hash` derives to `FstSignalHandle` (needed for use as HashMap key in fstty-core).
 - Update `Cargo.toml` workspace dependencies to point to GitHub repos instead of local paths (`../fst-reader`, `../fst-writer`).
 
 ## Repo layout

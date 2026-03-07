@@ -4,6 +4,7 @@
 
 pub mod error;
 pub mod filter;
+pub mod fst;
 pub mod hierarchy;
 pub mod hierarchy_legacy;
 pub mod types;
@@ -14,6 +15,7 @@ pub mod writer;
 
 pub use error::{Error, Result};
 pub use filter::{FilterPattern, SignalSelection};
+pub use fst::FstSource;
 pub use hierarchy_legacy::{HierarchyNavigator, HierarchyNode};
 pub use waveform::WaveformSource;
 pub use waveform_legacy::{WaveformFile, WaveformFormat};

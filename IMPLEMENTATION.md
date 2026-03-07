@@ -349,3 +349,29 @@ All changes, decisions, and issues are logged below as work progresses.
 **Decisions**:
 - Used local path deps (`../fst-reader`, `../fst-writer`) rather than git deps, matching the development setup
 - fst-reader pulls in its own fst-writer git dep; both coexist without conflict
+
+#### STEP-6: FstSource — WaveformSource for FST files — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/fst/mod.rs`: created, re-exports `FstSource`
+- `crates/fstty-core/src/fst/source.rs`: created with `FstSource` implementing `WaveformSource`
+- `crates/fstty-core/src/lib.rs`: added `pub mod fst;` and `pub use fst::FstSource;`
+
+**Tests added**:
+- `open_and_metadata`: open test FST, verify metadata (timescale, time range, counts)
+- `hierarchy_navigable`: verify hierarchy has scopes/vars, top scope has a name
+- `read_signals_one_signal`: read one signal over full range, verify callbacks fire with correct signal id
+- `read_signals_time_filter`: read with restricted time range, verify no callbacks outside range
+- `read_signals_multiple`: read two signals, verify both signal ids appear in results
+- `usable_as_trait_object`: verify `FstSource` works as `Box<dyn WaveformSource>`
+
+**Issues**: none
+
+**Decisions**:
+- Signal mapping built by reading fst-reader's hierarchy in parallel with wellen's (both iterate FST hierarchy in declaration order), matching vars by position to get `FstSignalHandle` for each `SignalId`
+- Added `Eq` and `Hash` derives to `FstSignalHandle` in fst-reader so it can be used directly as a HashMap key
+- Uses `FstReader::open_and_read_time_table()` for efficient time-range filtering
+- Time range conversion: WaveformSource uses `Range<u64>` (exclusive end), fst-reader uses inclusive — adjusted with `saturating_sub(1)`
+- Empty time ranges short-circuit without calling fst-reader
