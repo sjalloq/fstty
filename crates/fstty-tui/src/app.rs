@@ -10,10 +10,14 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use tokio::sync::mpsc;
 
+use fstty_core::fst::ExportConfig;
 use fstty_core::{FstSource, WaveformSource};
 
+use crate::export_state::ExportState;
 use crate::file_picker::FilePicker;
-use crate::hierarchy_browser::{HierarchyBrowser, ALL_SCOPE_TYPES};
+use crate::hierarchy_browser::{
+    HierarchyBrowser, NodeId, SelectionMode, ToggleResult, ALL_SCOPE_TYPES,
+};
 
 /// Result of an async waveform load
 type LoadResult = std::result::Result<FstSource, String>;
@@ -169,6 +173,8 @@ pub struct App {
     loaded_file: Option<PathBuf>,
     /// Loaded waveform source
     waveform: Option<FstSource>,
+    /// Export tab state (VC block selection)
+    export_state: Option<ExportState>,
     /// Channel sender to trigger async loads
     load_tx: mpsc::Sender<PathBuf>,
     /// Channel receiver for completed loads
@@ -219,6 +225,7 @@ impl App {
             hierarchy_browser: HierarchyBrowser::new(),
             loaded_file: None,
             waveform: None,
+            export_state: None,
             load_tx: request_tx,
             load_rx: result_rx,
             spinner: Spinner::new(),
@@ -271,6 +278,8 @@ impl App {
         self.clear_busy();
         match result {
             Ok(waveform) => {
+                let blocks = waveform.block_infos();
+                self.export_state = Some(ExportState::new(blocks));
                 self.waveform = Some(waveform);
                 self.hierarchy_browser.reset();
                 // No toast - the loaded file in title bar is sufficient feedback
@@ -278,6 +287,7 @@ impl App {
             Err(e) => {
                 self.loaded_file = None;
                 self.waveform = None;
+                self.export_state = None;
                 self.hierarchy_browser.reset();
                 self.show_error("Load Error", e);
             }
@@ -563,19 +573,117 @@ impl App {
                 self.hierarchy_browser.rebuild();
                 self.show_toast("", "Tree rebuilt", Duration::from_secs(1));
             }
+            // Export tab: cursor movement
+            KeyCode::Left | KeyCode::Char('h') if self.active_tab == Tab::Export && self.export_state.is_some() => {
+                self.export_state.as_mut().unwrap().move_cursor_left();
+            }
+            KeyCode::Right | KeyCode::Char('l') if self.active_tab == Tab::Export && self.export_state.is_some() => {
+                self.export_state.as_mut().unwrap().move_cursor_right();
+            }
+            // Export tab: mark start/end of range
+            KeyCode::Enter if self.active_tab == Tab::Export && self.export_state.is_some() => {
+                let es = self.export_state.as_mut().unwrap();
+                es.mark();
+                if es.has_valid_range() {
+                    if let Some((t0, t1)) = es.selected_time_range() {
+                        self.show_toast("", format!("Range: {}..{}", t0, t1), Duration::from_secs(2));
+                    }
+                }
+            }
+            // Export tab: clear selection
+            KeyCode::Esc if self.active_tab == Tab::Export && self.export_state.as_ref().is_some_and(|es| es.anchor().is_some()) => {
+                self.export_state.as_mut().unwrap().clear_selection();
+            }
+            // Export tab: execute export (x key)
+            KeyCode::Char('x') if self.active_tab == Tab::Export => {
+                self.run_export();
+            }
             // Toggle selection of current item (Space)
             KeyCode::Char(' ') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
-                if let Some(selected) = self.hierarchy_browser.toggle_selection() {
-                    let count = self.hierarchy_browser.selection_count();
-                    let msg = if selected {
-                        format!("Selected ({} total)", count)
-                    } else {
-                        format!("Deselected ({} total)", count)
-                    };
+                let result = self.hierarchy_browser.toggle_selection();
+                let count = self.hierarchy_browser.selection_count();
+                let msg = match result {
+                    ToggleResult::Selected(SelectionMode::Recursive) => {
+                        Some(format!("Selected (recursive) ({} total)", count))
+                    }
+                    ToggleResult::Selected(SelectionMode::ScopeOnly) => {
+                        Some(format!("Selected (scope only) ({} total)", count))
+                    }
+                    ToggleResult::Deselected => {
+                        Some(format!("Deselected ({} total)", count))
+                    }
+                    ToggleResult::NoSelection => None,
+                };
+                if let Some(msg) = msg {
                     self.show_toast("", msg, Duration::from_secs(1));
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Collect selected signal IDs from the hierarchy browser.
+    fn selected_signal_ids(&self) -> Vec<fstty_core::types::SignalId> {
+        let waveform = match self.waveform.as_ref() {
+            Some(w) => w,
+            None => return vec![],
+        };
+        let hierarchy = waveform.hierarchy();
+        let signals = collect_selected_signals(self.hierarchy_browser.selected_nodes(), hierarchy);
+        signals.into_iter().collect()
+    }
+
+    /// Run the filtered export.
+    fn run_export(&mut self) {
+        let export_state = match self.export_state.as_ref() {
+            Some(es) => es,
+            None => {
+                self.show_warning("Export", "No file loaded");
+                return;
+            }
+        };
+
+        if !export_state.has_valid_range() {
+            self.show_warning("Export", "Select a block range first (Enter to mark start/end)");
+            return;
+        }
+
+        let signal_ids = self.selected_signal_ids();
+        if signal_ids.is_empty() {
+            self.show_warning("Export", "No signals selected. Use Space in Browse tab to select.");
+            return;
+        }
+
+        let block_range = export_state.selected_range();
+
+        // Build output filename from source
+        let output_path = match self.loaded_file.as_ref() {
+            Some(p) => {
+                let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+                p.with_file_name(format!("{}_filtered.fst", stem))
+            }
+            None => PathBuf::from("filtered.fst"),
+        };
+
+        let config = ExportConfig {
+            output_path: output_path.clone(),
+            signals: signal_ids,
+            block_range,
+        };
+
+        match self.waveform.as_mut().unwrap().export_filtered(&config) {
+            Ok(result) => {
+                let msg = format!(
+                    "Exported {} signals, {} blocks to {}",
+                    result.signal_count,
+                    result.block_count,
+                    result.output_path.display()
+                );
+                self.show_info("Export Complete", msg);
+            }
+            Err(e) => {
+                self.show_error("Export Error", format!("{}", e));
+            }
         }
     }
 
@@ -604,7 +712,11 @@ impl App {
         self.render_tab_content(frame, chunks[2]);
 
         // Footer with key hints
-        let footer = Paragraph::new(" q: quit | o: open | f: filter | s: signals | Space: select | R: rebuild")
+        let footer_text = match self.active_tab {
+            Tab::Browse => " q: quit | o: open | f: filter | s: signals | Space: select | R: rebuild",
+            Tab::Export => " q: quit | o: open | Enter: mark | Esc: clear | x: export",
+        };
+        let footer = Paragraph::new(footer_text)
             .style(Style::default().reversed());
         frame.render_widget(footer, chunks[3]);
 
@@ -652,12 +764,7 @@ impl App {
     fn render_tab_content(&mut self, frame: &mut Frame, area: Rect) {
         match self.active_tab {
             Tab::Browse => self.render_browse_tab(frame, area),
-            Tab::Export => {
-                let paragraph = Paragraph::new("Export: select signals and time range, then export filtered FST")
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(paragraph, area);
-            }
+            Tab::Export => self.render_export_tab(frame, area),
         }
     }
 
@@ -679,6 +786,158 @@ impl App {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, inner);
         }
+    }
+
+    /// Render the Export tab with block timeline
+    fn render_export_tab(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default().borders(Borders::ALL).title(" Export ");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let export_state = match self.export_state.as_ref() {
+            Some(es) if es.block_count() > 0 => es,
+            _ => {
+                let msg = Paragraph::new("No file loaded. Press 'o' to open.")
+                    .alignment(Alignment::Center);
+                frame.render_widget(msg, inner);
+                return;
+            }
+        };
+
+        // Layout: info line + timeline + status/help
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Info
+                Constraint::Length(3), // Block timeline
+                Constraint::Length(2), // Selection details
+                Constraint::Min(0),   // Spacer
+                Constraint::Length(1), // Help line
+            ])
+            .split(inner);
+
+        // Info line: signal selection count and block count
+        let sel_count = self.hierarchy_browser.selection_count();
+        let info = format!(
+            " {} VC blocks | {} signals selected for export",
+            export_state.block_count(),
+            sel_count,
+        );
+        frame.render_widget(Paragraph::new(info), chunks[0]);
+
+        // Block timeline: a horizontal bar of blocks
+        self.render_block_timeline(frame, chunks[1], export_state);
+
+        // Selection details
+        if let Some((t0, t1)) = export_state.selected_time_range() {
+            let range = export_state.selected_range().unwrap();
+            let detail = format!(
+                " Selected blocks {}-{} | Time: {}..{}",
+                range.start, range.end - 1, t0, t1,
+            );
+            frame.render_widget(
+                Paragraph::new(detail).style(Style::default().fg(Color::Green)),
+                chunks[2],
+            );
+        } else if let Some(cursor_block) = export_state.block(export_state.cursor()) {
+            let detail = format!(
+                " Cursor: block {} | Time: {}..{}",
+                cursor_block.index, cursor_block.start_time, cursor_block.end_time,
+            );
+            frame.render_widget(
+                Paragraph::new(detail).style(Style::default().fg(Color::DarkGray)),
+                chunks[2],
+            );
+        }
+
+        // Help line
+        let help = if export_state.has_valid_range() {
+            " x: export | Esc: clear selection"
+        } else if export_state.anchor().is_some() {
+            " Left/Right: move cursor | Enter: set end | Esc: clear"
+        } else {
+            " Left/Right: move cursor | Enter: set start"
+        };
+        frame.render_widget(
+            Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
+            chunks[4],
+        );
+    }
+
+    /// Render the block timeline bar.
+    fn render_block_timeline(&self, frame: &mut Frame, area: Rect, export_state: &ExportState) {
+        if area.width < 2 || area.height < 1 {
+            return;
+        }
+
+        let block_count = export_state.block_count();
+        let available_width = area.width as usize;
+
+        // Each block gets at least 1 column; if there are more blocks than columns,
+        // we show a windowed view centered on the cursor.
+        let (start_block, end_block) = if block_count <= available_width {
+            (0, block_count)
+        } else {
+            // Window centered on cursor
+            let half = available_width / 2;
+            let cursor = export_state.cursor();
+            let start = cursor.saturating_sub(half);
+            let end = (start + available_width).min(block_count);
+            let start = end.saturating_sub(available_width);
+            (start, end)
+        };
+
+        let highlight = export_state.highlighted_range();
+
+        let mut spans = Vec::new();
+        for i in start_block..end_block {
+            let is_cursor = i == export_state.cursor();
+            let is_highlighted = highlight.as_ref().is_some_and(|r| r.contains(&i));
+
+            let style = if is_cursor && is_highlighted {
+                Style::default().fg(Color::Black).bg(Color::Cyan).bold()
+            } else if is_cursor {
+                Style::default().fg(Color::Black).bg(Color::White).bold()
+            } else if is_highlighted {
+                Style::default().fg(Color::Black).bg(Color::Blue)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
+            let ch = if is_cursor { "█" } else if is_highlighted { "▓" } else { "░" };
+            spans.push(Span::styled(ch, style));
+        }
+
+        // Show range indicators on a second line
+        let label_line = if block_count <= available_width {
+            let mut chars: Vec<char> = vec![' '; available_width];
+            // Mark anchor
+            if let Some(a) = export_state.anchor() {
+                if a >= start_block && a < end_block {
+                    chars[a - start_block] = '▲';
+                }
+            }
+            // Mark cursor
+            let c = export_state.cursor();
+            if c >= start_block && c < end_block {
+                chars[c - start_block] = '▲';
+            }
+            chars.iter().collect::<String>()
+        } else {
+            format!(
+                " blocks {}-{} of {} (cursor: {})",
+                start_block,
+                end_block - 1,
+                block_count,
+                export_state.cursor(),
+            )
+        };
+
+        let timeline = Paragraph::new(vec![
+            Line::from(spans),
+            Line::from(Span::styled(label_line, Style::default().fg(Color::DarkGray))),
+        ]);
+        frame.render_widget(timeline, area);
     }
 
     /// Render title bar with app name and status
@@ -872,9 +1131,168 @@ impl App {
     }
 }
 
+/// Collect signal IDs from a set of selected nodes, respecting selection modes.
+/// - `Var` + any mode → add that signal
+/// - `Scope` + `Recursive` → all descendant signals
+/// - `Scope` + `ScopeOnly` → only direct vars
+fn collect_selected_signals(
+    selections: &std::collections::HashMap<NodeId, SelectionMode>,
+    hierarchy: &fstty_core::hierarchy::Hierarchy,
+) -> Vec<fstty_core::types::SignalId> {
+    use std::collections::HashSet;
+    let mut signal_set = HashSet::new();
+    for (node_id, mode) in selections {
+        match node_id {
+            NodeId::Var(var_id) => {
+                signal_set.insert(hierarchy.var_signal_id(*var_id));
+            }
+            NodeId::Scope(scope_id) => match mode {
+                SelectionMode::Recursive => {
+                    collect_scope_signals_recursive(hierarchy, *scope_id, &mut signal_set);
+                }
+                SelectionMode::ScopeOnly => {
+                    for &var_id in hierarchy.scope_vars(*scope_id) {
+                        signal_set.insert(hierarchy.var_signal_id(var_id));
+                    }
+                }
+            },
+            NodeId::Root => {}
+        }
+    }
+    signal_set.into_iter().collect()
+}
+
+/// Recursively collect all signal IDs under a scope (including nested child scopes).
+fn collect_scope_signals_recursive(
+    hierarchy: &fstty_core::hierarchy::Hierarchy,
+    scope_id: fstty_core::types::ScopeId,
+    signal_set: &mut std::collections::HashSet<fstty_core::types::SignalId>,
+) {
+    for &var_id in hierarchy.scope_vars(scope_id) {
+        signal_set.insert(hierarchy.var_signal_id(var_id));
+    }
+    for &child_id in hierarchy.scope_children(scope_id) {
+        collect_scope_signals_recursive(hierarchy, child_id, signal_set);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use fstty_core::hierarchy::{HierarchyBuilder, HierarchyEvent};
+    use fstty_core::types::{SignalId, VarDirection, VarType};
+
+    /// Build a test hierarchy:
+    ///   top (Module)              — scope 0
+    ///     ├── var_a  (signal 1)   — var 0
+    ///     ├── var_b  (signal 2)   — var 1
+    ///     └── child (Module)      — scope 1
+    ///           ├── var_c  (signal 3) — var 2
+    ///           └── var_d  (signal 4) — var 3
+    fn test_hierarchy() -> fstty_core::hierarchy::Hierarchy {
+        let mut b = HierarchyBuilder::new();
+        b.event(HierarchyEvent::EnterScope {
+            name: "top".into(),
+            scope_type: fstty_core::types::ScopeType::Module,
+        });
+        b.event(HierarchyEvent::Var {
+            name: "var_a".into(),
+            var_type: VarType::Wire,
+            direction: VarDirection::Implicit,
+            width: 1,
+            signal_id: SignalId::from_raw(1),
+            is_alias: false,
+        });
+        b.event(HierarchyEvent::Var {
+            name: "var_b".into(),
+            var_type: VarType::Wire,
+            direction: VarDirection::Implicit,
+            width: 1,
+            signal_id: SignalId::from_raw(2),
+            is_alias: false,
+        });
+        b.event(HierarchyEvent::EnterScope {
+            name: "child".into(),
+            scope_type: fstty_core::types::ScopeType::Module,
+        });
+        b.event(HierarchyEvent::Var {
+            name: "var_c".into(),
+            var_type: VarType::Wire,
+            direction: VarDirection::Implicit,
+            width: 1,
+            signal_id: SignalId::from_raw(3),
+            is_alias: false,
+        });
+        b.event(HierarchyEvent::Var {
+            name: "var_d".into(),
+            var_type: VarType::Wire,
+            direction: VarDirection::Implicit,
+            width: 1,
+            signal_id: SignalId::from_raw(4),
+            is_alias: false,
+        });
+        b.event(HierarchyEvent::ExitScope);
+        b.event(HierarchyEvent::ExitScope);
+        b.build()
+    }
+
+    #[test]
+    fn scope_recursive_collects_all_descendants() {
+        let h = test_hierarchy();
+        let top = *h.top_scopes().first().unwrap();
+        let mut sel = HashMap::new();
+        sel.insert(NodeId::Scope(top), SelectionMode::Recursive);
+        let signals = collect_selected_signals(&sel, &h);
+        assert_eq!(signals.len(), 4);
+    }
+
+    #[test]
+    fn scope_only_collects_direct_vars() {
+        let h = test_hierarchy();
+        let top = *h.top_scopes().first().unwrap();
+        let mut sel = HashMap::new();
+        sel.insert(NodeId::Scope(top), SelectionMode::ScopeOnly);
+        let signals = collect_selected_signals(&sel, &h);
+        // Only var_a and var_b (direct vars of top), not var_c/var_d in child
+        assert_eq!(signals.len(), 2);
+        // Verify they're the right signals
+        let expected: std::collections::HashSet<_> = h.scope_vars(top).iter()
+            .map(|&v| h.var_signal_id(v))
+            .collect();
+        let actual: std::collections::HashSet<_> = signals.into_iter().collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn var_selection_collects_that_signal() {
+        let h = test_hierarchy();
+        let top = *h.top_scopes().first().unwrap();
+        let child = h.scope_children(top)[0];
+        let var_c = h.scope_vars(child)[0];
+        let expected_signal = h.var_signal_id(var_c);
+
+        let mut sel = HashMap::new();
+        sel.insert(NodeId::Var(var_c), SelectionMode::Recursive);
+        let signals = collect_selected_signals(&sel, &h);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0], expected_signal);
+    }
+
+    #[test]
+    fn mixed_selections_deduplicates() {
+        let h = test_hierarchy();
+        let top = *h.top_scopes().first().unwrap();
+        let var_a = h.scope_vars(top)[0];
+
+        let mut sel = HashMap::new();
+        // Recursive on top (gets all 4 signals)
+        sel.insert(NodeId::Scope(top), SelectionMode::Recursive);
+        // Also individually select var_a — should not duplicate
+        sel.insert(NodeId::Var(var_a), SelectionMode::Recursive);
+        let signals = collect_selected_signals(&sel, &h);
+        assert_eq!(signals.len(), 4);
+    }
 
     #[test]
     fn tab_all_contains_only_browse_and_export() {

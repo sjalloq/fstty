@@ -448,3 +448,85 @@ All changes, decisions, and issues are logged below as work progresses.
 
 **Decisions**:
 - Export tab renders a placeholder message; full UI will be built in Step 10
+
+#### STEP-10: Export tab UI and wiring — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-tui/src/export_state.rs`: created with `ExportState` — state machine for VC block range selection (idle → start marked → range finalized → clear)
+- `crates/fstty-tui/src/lib.rs`: added `pub mod export_state;` and `pub use ExportState`
+- `crates/fstty-tui/src/app.rs`:
+  - Added `export_state: Option<ExportState>` field, initialized from `block_infos()` on file load
+  - Export tab key handling: Left/Right to move cursor, Enter to mark start/end, Esc to clear, `x` to export
+  - `render_export_tab()`: shows block count, signal selection count, block timeline bar, selection details, context-sensitive help
+  - `render_block_timeline()`: horizontal bar of blocks with cursor highlight, selection range highlight, windowed view for large block counts
+  - `selected_signal_ids()`: collects `SignalId`s from hierarchy browser's selected nodes (vars directly, scopes expand to their vars)
+  - `run_export()`: validates range and signal selection, builds `ExportConfig`, calls `FstSource::export_filtered()`, shows result popup
+  - Tab-specific footer key hints
+- `crates/fstty-tui/src/hierarchy_browser.rs`: added `selected_nodes()` method to expose selected node IDs
+
+**Tests added** (16 new in export_state):
+- `initial_state_is_idle`: verify initial state has no selection
+- `mark_once_sets_anchor`: first mark sets anchor, range not valid yet
+- `mark_twice_finalizes_range`: two marks produce a valid range
+- `mark_reverse_order`: anchor > cursor produces correct min..max range
+- `clear_returns_to_idle`: clear resets anchor and finalized state
+- `mark_after_clear_starts_fresh`: can start a new selection after clear
+- `move_cursor_left_clamped_at_zero`: cursor doesn't go below 0
+- `move_cursor_right_clamped_at_max`: cursor doesn't exceed block_count-1
+- `cursor_locked_when_range_finalized`: cursor movement blocked after finalization
+- `empty_blocks`: all operations are safe on empty block list
+- `has_valid_range_only_after_two_marks`: precise state machine check
+- `single_block_range`: marking same block twice produces valid 1-block range
+- `selected_time_range`: verify time range from block metadata
+- `highlighted_range_none_when_idle`: no highlight without anchor
+- `highlighted_range_follows_cursor`: highlight spans anchor..cursor
+- `mark_ignored_when_finalized`: third mark is no-op
+
+**Issues**: none
+
+**Decisions**:
+- `ExportState` cursor is locked after range finalization — user must Esc to clear before selecting a new range
+- Signal collection from hierarchy browser uses `HashSet` for deduplication (SignalId doesn't derive Ord)
+- Output filename is auto-generated as `<stem>_filtered.fst` next to the source file
+- Block timeline uses a windowed view when there are more blocks than terminal columns, centered on cursor
+- Export is synchronous (blocking) since `export_filtered` uses raw block copy which is fast; could be made async if needed for very large files
+
+#### Tri-state scope selection for export — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/types.rs`: added `SignalId::from_raw(u32)` public constructor (needed for test hierarchy construction from external crates)
+- `crates/fstty-tui/src/hierarchy_browser.rs`:
+  - Added `SelectionMode` enum (Recursive, ScopeOnly) and `ToggleResult` enum
+  - Added `next_selection_state()` pure function for tri-state cycle logic
+  - Changed `selected_for_export` from `HashSet<NodeId>` to `HashMap<NodeId, SelectionMode>`
+  - `toggle_selection()` now returns `ToggleResult` instead of `Option<bool>`; scopes cycle None→Recursive→ScopeOnly→None, vars cycle None→Recursive→None
+  - Renamed `is_selected_for_export()` to `selection_mode()` returning `Option<SelectionMode>`
+  - `selected_nodes()` returns `&HashMap<NodeId, SelectionMode>`
+  - Updated `build_scope_item()` and `build_var_item()` with `ancestor_recursive` parameter for visual propagation — children under a Recursive parent show ● visually
+  - Scope markers: ● (Recursive), ○ (ScopeOnly), ● (inherited from ancestor)
+- `crates/fstty-tui/src/app.rs`:
+  - Updated imports to include `SelectionMode`, `ToggleResult`
+  - Space key handler matches on `ToggleResult` with mode-specific toast messages
+  - `selected_signal_ids()` delegates to new `collect_selected_signals()` free function
+  - `collect_selected_signals()`: Scope+Recursive→recursive, Scope+ScopeOnly→direct vars only, Var→single signal
+
+**Tests added**:
+- `hierarchy_browser::tests::next_state_scope_cycles_recursive_scope_only_none`
+- `hierarchy_browser::tests::next_state_var_cycles_recursive_none`
+- `hierarchy_browser::tests::selection_mode_returns_correct_state`
+- `hierarchy_browser::tests::selection_count_reflects_map_size`
+- `hierarchy_browser::tests::clear_selection_empties_map`
+- `app::tests::scope_recursive_collects_all_descendants`
+- `app::tests::scope_only_collects_direct_vars`
+- `app::tests::var_selection_collects_that_signal`
+- `app::tests::mixed_selections_deduplicates`
+
+**Issues**: none
+
+**Decisions**:
+- Added `SignalId::from_raw()` as a public constructor so external crates can build test hierarchies via `HierarchyBuilder` without needing `pub(crate)` access to the inner field
+- Visual propagation uses `ancestor_recursive` parameter threaded through tree building — no stored state needed

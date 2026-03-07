@@ -17,6 +17,13 @@ pub struct VarId(pub(crate) u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalId(pub(crate) u32);
 
+impl SignalId {
+    /// Create a SignalId from a raw u32 (for use in HierarchyBuilder from external crates).
+    pub fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+}
+
 impl fmt::Debug for ScopeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ScopeId({})", self.0)
