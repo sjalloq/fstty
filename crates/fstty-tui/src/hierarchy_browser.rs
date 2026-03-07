@@ -1,12 +1,13 @@
 //! Hierarchy browser component for navigating waveform scopes and signals
 
 use std::collections::HashSet;
-use std::num::NonZeroU32;
 
 use ratatui::prelude::*;
 use ratatui::widgets::Block;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use wellen::{Hierarchy, ScopeType};
+
+use fstty_core::hierarchy::Hierarchy;
+use fstty_core::types::{ScopeId, ScopeType, VarDirection, VarId};
 
 /// All available scope types for filtering
 pub const ALL_SCOPE_TYPES: &[(ScopeType, &str, &str)] = &[
@@ -23,115 +24,68 @@ pub const ALL_SCOPE_TYPES: &[(ScopeType, &str, &str)] = &[
     (ScopeType::Class, "Class", "SV class"),
     (ScopeType::Struct, "Struct", "SV struct"),
     (ScopeType::Union, "Union", "SV union"),
-    // VHDL
-    (ScopeType::VhdlArchitecture, "VHDL Arch", "VHDL architecture"),
-    (ScopeType::VhdlBlock, "VHDL Block", "VHDL block"),
-    (ScopeType::VhdlGenerate, "VHDL Gen", "VHDL generate"),
-    (ScopeType::VhdlForGenerate, "VHDL For", "VHDL for generate"),
-    (ScopeType::VhdlIfGenerate, "VHDL If", "VHDL if generate"),
-    (ScopeType::VhdlProcess, "VHDL Proc", "VHDL process"),
-    (ScopeType::VhdlFunction, "VHDL Func", "VHDL function"),
-    (ScopeType::VhdlProcedure, "VHDL Procedure", "VHDL procedure"),
-    (ScopeType::VhdlPackage, "VHDL Pkg", "VHDL package"),
-    (ScopeType::VhdlRecord, "VHDL Rec", "VHDL record"),
-    (ScopeType::VhdlArray, "VHDL Arr", "VHDL array"),
-    // Other
-    (ScopeType::GhwGeneric, "GHW Generic", "GHW generic"),
-    (ScopeType::Unknown, "Unknown", "Unknown scope type"),
 ];
 
-/// Convert ScopeType to a discriminant we can hash
-/// (ScopeType doesn't implement Hash)
-fn scope_type_id(st: ScopeType) -> u8 {
-    // Use the discriminant - ScopeType is a simple enum
-    // This is safe since we're just getting an integer representation
-    unsafe { *(&st as *const ScopeType as *const u8) }
-}
-
 /// Identifier for tree nodes
-/// Uses raw indices since wellen's ScopeRef/VarRef don't implement Hash
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum NodeId {
     #[default]
     Root,
-    /// Scope with its raw index
-    Scope(NonZeroU32),
-    /// Variable with its raw index
-    Var(NonZeroU32),
-}
-
-impl NodeId {
-    fn from_scope(scope_ref: wellen::ScopeRef) -> Self {
-        // ScopeRef is a newtype over NonZeroU32, we need to extract the raw value
-        // Using unsafe transmute since there's no public accessor
-        let raw: NonZeroU32 = unsafe { std::mem::transmute(scope_ref) };
-        NodeId::Scope(raw)
-    }
-
-    fn from_var(var_ref: wellen::VarRef) -> Self {
-        let raw: NonZeroU32 = unsafe { std::mem::transmute(var_ref) };
-        NodeId::Var(raw)
-    }
-
+    /// Scope node
+    Scope(ScopeId),
+    /// Variable node
+    Var(VarId),
 }
 
 /// Filter configuration for the hierarchy browser
 #[derive(Clone, Debug)]
 pub struct FilterConfig {
-    /// Scope type IDs to show (navigation hierarchy)
-    /// Uses u8 discriminants since ScopeType doesn't implement Hash
-    scope_type_ids: HashSet<u8>,
+    /// Scope types to show (navigation hierarchy)
+    scope_types: HashSet<ScopeType>,
 }
 
 impl Default for FilterConfig {
     fn default() -> Self {
         // Default: only show navigable hierarchy (modules, generates, interfaces, begin blocks)
-        let mut scope_type_ids = HashSet::new();
-        scope_type_ids.insert(scope_type_id(ScopeType::Module));
-        scope_type_ids.insert(scope_type_id(ScopeType::Generate));
-        scope_type_ids.insert(scope_type_id(ScopeType::Interface));
-        scope_type_ids.insert(scope_type_id(ScopeType::Begin));
-        // Also include VHDL equivalents
-        scope_type_ids.insert(scope_type_id(ScopeType::VhdlArchitecture));
-        scope_type_ids.insert(scope_type_id(ScopeType::VhdlBlock));
-        scope_type_ids.insert(scope_type_id(ScopeType::VhdlForGenerate));
-        scope_type_ids.insert(scope_type_id(ScopeType::VhdlIfGenerate));
-        scope_type_ids.insert(scope_type_id(ScopeType::VhdlGenerate));
-        Self { scope_type_ids }
+        let mut scope_types = HashSet::new();
+        scope_types.insert(ScopeType::Module);
+        scope_types.insert(ScopeType::Generate);
+        scope_types.insert(ScopeType::Interface);
+        scope_types.insert(ScopeType::Begin);
+        Self { scope_types }
     }
 }
 
 impl FilterConfig {
     /// Check if a scope type should be shown
     pub fn allows_scope(&self, scope_type: ScopeType) -> bool {
-        self.scope_type_ids.contains(&scope_type_id(scope_type))
+        self.scope_types.contains(&scope_type)
     }
 
     /// Toggle a scope type on/off
     pub fn toggle_scope_type(&mut self, scope_type: ScopeType) {
-        let id = scope_type_id(scope_type);
-        if self.scope_type_ids.contains(&id) {
-            self.scope_type_ids.remove(&id);
+        if self.scope_types.contains(&scope_type) {
+            self.scope_types.remove(&scope_type);
         } else {
-            self.scope_type_ids.insert(id);
+            self.scope_types.insert(scope_type);
         }
     }
 
     /// Check if a scope type is enabled
     pub fn is_scope_enabled(&self, scope_type: ScopeType) -> bool {
-        self.scope_type_ids.contains(&scope_type_id(scope_type))
+        self.scope_types.contains(&scope_type)
     }
 
     /// Enable all scope types
     pub fn enable_all_scopes(&mut self) {
         for (scope_type, _, _) in ALL_SCOPE_TYPES {
-            self.scope_type_ids.insert(scope_type_id(*scope_type));
+            self.scope_types.insert(*scope_type);
         }
     }
 
     /// Disable all scope types
     pub fn disable_all_scopes(&mut self) {
-        self.scope_type_ids.clear();
+        self.scope_types.clear();
     }
 
     /// Reset to default (navigable hierarchy only)
@@ -152,6 +106,12 @@ pub struct HierarchyBrowser {
     selected_for_export: HashSet<NodeId>,
     /// Filter configuration
     filter: FilterConfig,
+}
+
+impl Default for HierarchyBrowser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HierarchyBrowser {
@@ -302,15 +262,11 @@ impl HierarchyBrowser {
     fn build_tree_items<'a>(&self, hierarchy: &'a Hierarchy) -> Vec<TreeItem<'a, NodeId>> {
         let mut items = Vec::new();
 
-        // Add top-level scopes (filtered by config)
-        for scope_ref in hierarchy.scopes() {
-            if let Some(item) = self.build_scope_item(hierarchy, scope_ref, None) {
+        for &scope_id in hierarchy.top_scopes() {
+            if let Some(item) = self.build_scope_item(hierarchy, scope_id) {
                 items.push(item);
             }
         }
-
-        // Top-level variables are only shown if there's no parent scope
-        // (rare, but handle it - these would need a "show all" at root level)
 
         items
     }
@@ -319,19 +275,17 @@ impl HierarchyBrowser {
     fn build_scope_item<'a>(
         &self,
         hierarchy: &'a Hierarchy,
-        scope_ref: wellen::ScopeRef,
-        _parent_node_id: Option<NodeId>,
+        scope_id: ScopeId,
     ) -> Option<TreeItem<'a, NodeId>> {
-        let scope = &hierarchy[scope_ref];
-        let scope_type = scope.scope_type();
+        let scope_type = hierarchy.scope_type(scope_id);
 
         // Filter: skip scopes that don't match our filter config
         if !self.filter.allows_scope(scope_type) {
             return None;
         }
 
-        let name = scope.name(hierarchy);
-        let node_id = NodeId::from_scope(scope_ref);
+        let name = hierarchy.scope_name(scope_id);
+        let node_id = NodeId::Scope(scope_id);
 
         // Check if signals should be shown for this scope
         let show_signals_here = self.show_signals.contains(&node_id);
@@ -344,12 +298,9 @@ impl HierarchyBrowser {
         let label = format!("{}{} ({:?}){}", selected_marker, name, scope_type, signals_marker);
 
         // Check if this scope has visible children
-        let has_child_scopes = scope.scopes(hierarchy)
-            .any(|child_ref| {
-                let child = &hierarchy[child_ref];
-                self.filter.allows_scope(child.scope_type())
-            });
-        let has_child_vars = show_signals_here && scope.vars(hierarchy).next().is_some();
+        let has_child_scopes = hierarchy.scope_children(scope_id).iter()
+            .any(|&child_id| self.filter.allows_scope(hierarchy.scope_type(child_id)));
+        let has_child_vars = show_signals_here && !hierarchy.scope_vars(scope_id).is_empty();
         let has_children = has_child_scopes || has_child_vars;
 
         if !has_children {
@@ -363,16 +314,16 @@ impl HierarchyBrowser {
             let mut children = Vec::new();
 
             // Child scopes (filtered)
-            for child_ref in scope.scopes(hierarchy) {
-                if let Some(child_item) = self.build_scope_item(hierarchy, child_ref, Some(node_id)) {
+            for &child_id in hierarchy.scope_children(scope_id) {
+                if let Some(child_item) = self.build_scope_item(hierarchy, child_id) {
                     children.push(child_item);
                 }
             }
 
             // Child variables (only if "show signals" is enabled for this scope)
             if show_signals_here {
-                for var_ref in scope.vars(hierarchy) {
-                    if let Some(var_item) = self.build_var_item(hierarchy, var_ref) {
+                for &var_id in hierarchy.scope_vars(scope_id) {
+                    if let Some(var_item) = self.build_var_item(hierarchy, var_id) {
                         children.push(var_item);
                     }
                 }
@@ -395,13 +346,12 @@ impl HierarchyBrowser {
     fn build_var_item<'a>(
         &self,
         hierarchy: &'a Hierarchy,
-        var_ref: wellen::VarRef,
+        var_id: VarId,
     ) -> Option<TreeItem<'a, NodeId>> {
-        let var = &hierarchy[var_ref];
-        let name = var.name(hierarchy);
-        let width = var.length().map(|l| l.to_string()).unwrap_or_default();
-        let direction = var.direction();
-        let node_id = NodeId::from_var(var_ref);
+        let name = hierarchy.var_name(var_id);
+        let width = hierarchy.var_width(var_id);
+        let direction = hierarchy.var_direction(var_id);
+        let node_id = NodeId::Var(var_id);
 
         // Check if selected for export
         let is_selected = self.selected_for_export.contains(&node_id);
@@ -409,13 +359,13 @@ impl HierarchyBrowser {
 
         // Format: "name [width]" with direction indicator
         let dir_indicator = match direction {
-            wellen::VarDirection::Input => "->",
-            wellen::VarDirection::Output => "<-",
-            wellen::VarDirection::InOut => "<>",
+            VarDirection::Input => "->",
+            VarDirection::Output => "<-",
+            VarDirection::InOut => "<>",
             _ => "  ",
         };
 
-        let label = if width.is_empty() {
+        let label = if width == 0 {
             format!("{}{} {}", selected_marker, dir_indicator, name)
         } else {
             format!("{}{} {} [{}]", selected_marker, dir_indicator, name, width)

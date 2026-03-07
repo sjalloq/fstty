@@ -401,3 +401,28 @@ All changes, decisions, and issues are logged below as work progresses.
 - Hierarchy is re-read from fst-reader and filtered (lazy scope emission: parent scopes only written when a kept variable is encountered)
 - Signal data is copied raw (no decompression) with deduplication: aliased signals sharing the same compressed blob are written once
 - `FstSource` fields changed to `pub(crate)` to allow the export module to access them
+
+#### STEP-8: Migrate TUI to fstty-core types — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-core/src/types.rs`: added `Hash` derive to `ScopeType` (needed for `FilterConfig`'s `HashSet<ScopeType>`)
+- `crates/fstty-tui/Cargo.toml`: removed `wellen` dependency
+- `crates/fstty-tui/src/app.rs`: replaced `WaveformFile` with `FstSource`, added `WaveformSource` trait import
+- `crates/fstty-tui/src/hierarchy_browser.rs`: full rewrite — replaced all wellen types (`Hierarchy`, `ScopeType`, `ScopeRef`, `VarRef`, `VarDirection`) with fstty-core types (`ScopeId`, `VarId`, `ScopeType`, `VarDirection`, `Hierarchy`); removed unsafe transmutes; `NodeId` now wraps `ScopeId`/`VarId` directly; `FilterConfig` uses `HashSet<ScopeType>` instead of discriminant hack
+- `crates/fstty-tui/src/components/tree.rs`: replaced `wellen::ScopeRef` import with `fstty_core::types::ScopeId` (file is dead code, not in module tree)
+
+**Tests**:
+- `cargo build -p fstty-tui` succeeds
+- `cargo test -p fstty-tui` passes
+- `cargo test -p fstty-core` passes (all 50 tests)
+- Grep confirms zero `use wellen` in fstty-tui
+
+**Issues**: none
+
+**Decisions**:
+- Used `FstSource` directly (not `Box<dyn WaveformSource>`) since only FST backend exists; will switch to trait object when VCD backend is added
+- `ALL_SCOPE_TYPES` reduced from 25 entries (wellen) to 12 entries (fstty-core's `ScopeType` enum); VHDL/GHW scope types are mapped to `Module` by the wellen adapter, so they're covered by the Module filter
+- `components/tree.rs` imports updated but file left in place as dead code (not in module tree); will be removed in Step 11
+- Added `Hash` derive to `ScopeType` — clean, simple enum benefits from it; eliminates the unsafe discriminant-casting hack

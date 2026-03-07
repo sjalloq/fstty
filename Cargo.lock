@@ -452,7 +452,6 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tui-tree-widget",
- "wellen",
 ]
 
 [[package]]

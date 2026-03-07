@@ -4,8 +4,7 @@ use std::collections::HashSet;
 
 use ratatui::prelude::*;
 use ratatui::widgets::{List, ListItem};
-use wellen::ScopeRef;
-
+use fstty_core::types::ScopeId;
 use fstty_core::hierarchy_legacy::{HierarchyNavigator, HierarchyNode};
 
 /// Tree component for displaying waveform hierarchy

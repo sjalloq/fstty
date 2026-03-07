@@ -39,7 +39,7 @@ impl fmt::Debug for SignalId {
 // Enum types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeType {
     Module,
     Task,

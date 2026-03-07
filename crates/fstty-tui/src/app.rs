@@ -10,13 +10,13 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use tokio::sync::mpsc;
 
-use fstty_core::WaveformFile;
+use fstty_core::{FstSource, WaveformSource};
 
 use crate::file_picker::FilePicker;
 use crate::hierarchy_browser::{HierarchyBrowser, ALL_SCOPE_TYPES};
 
 /// Result of an async waveform load
-type LoadResult = std::result::Result<WaveformFile, String>;
+type LoadResult = std::result::Result<FstSource, String>;
 
 /// Available tabs/tools
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -76,6 +76,12 @@ pub struct Spinner {
     interval: Duration,
 }
 
+impl Default for Spinner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Spinner {
     pub fn new() -> Self {
         Self {
@@ -116,6 +122,12 @@ pub struct FilterPopup {
     pub active: bool,
     /// Currently selected item index
     pub selected: usize,
+}
+
+impl Default for FilterPopup {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FilterPopup {
@@ -163,8 +175,8 @@ pub struct App {
     hierarchy_browser: HierarchyBrowser,
     /// Currently loaded file path
     loaded_file: Option<PathBuf>,
-    /// Loaded waveform (hierarchy only)
-    waveform: Option<WaveformFile>,
+    /// Loaded waveform source
+    waveform: Option<FstSource>,
     /// Channel sender to trigger async loads
     load_tx: mpsc::Sender<PathBuf>,
     /// Channel receiver for completed loads
@@ -192,7 +204,7 @@ impl App {
             while let Some(path) = request_rx.recv().await {
                 // Run blocking waveform load on the blocking thread pool
                 let result = tokio::task::spawn_blocking(move || {
-                    WaveformFile::open(&path)
+                    FstSource::open(&path)
                         .map_err(|e| e.to_string())
                 }).await;
 
@@ -356,11 +368,9 @@ impl App {
             tokio::select! {
                 // Keyboard/terminal events
                 maybe_event = event_stream.next() => {
-                    if let Some(Ok(event)) = maybe_event {
-                        if let Event::Key(key) = event {
-                            if key.kind == KeyEventKind::Press {
-                                self.handle_key(key.code);
-                            }
+                    if let Some(Ok(Event::Key(key))) = maybe_event {
+                        if key.kind == KeyEventKind::Press {
+                            self.handle_key(key.code);
                         }
                     }
                 }
@@ -426,7 +436,7 @@ impl App {
 
         match fs::write(&filename, &content) {
             Ok(_) => self.show_toast("Screenshot", format!("Saved to {}", filename), Duration::from_secs(2)),
-            Err(e) => self.show_error("Screenshot", &format!("Failed to save: {}", e)),
+            Err(e) => self.show_error("Screenshot", format!("Failed to save: {}", e)),
         }
     }
 

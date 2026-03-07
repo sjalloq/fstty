@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
                 "info" => app.show_info("Info", "This is an info message."),
                 "warning" => app.show_warning("Warning", "This is a warning message."),
                 "error" => app.show_error("Error", "This is an error message."),
-                _ => app.show_info("Unknown", &format!("Unknown level: {}", level)),
+                _ => app.show_info("Unknown", format!("Unknown level: {}", level)),
             }
         }
         if let Some(busy_msg) = args.busy {
