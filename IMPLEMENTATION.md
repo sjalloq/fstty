@@ -222,22 +222,27 @@ Test FST files are available at `/home/sjalloq/Work/fst-reader/fsts/` and `./wav
 
 All changes, decisions, and issues are logged below as work progresses.
 
-### Template
+#### STEP-1: Core types — 2026-03-07
 
-```
-#### STEP-N: Title — YYYY-MM-DD
-
-**Status**: not started | in progress | complete | blocked
+**Status**: complete
 
 **Changes**:
-- file: description of change
+- `crates/fstty-core/src/types.rs`: created with `ScopeId`, `VarId`, `SignalId`, `ScopeType`, `VarType`, `VarDirection`, `SignalValue`, `WaveformMetadata`
+- `crates/fstty-core/src/lib.rs`: added `pub mod types;`
 
 **Tests added**:
-- description
+- `id_copy_and_compare`: construct, copy, compare all ID types
+- `id_as_hashmap_key`: use ScopeId, VarId, SignalId as HashMap keys
+- `id_debug_format`: verify Debug output format
+- `scope_type_variants`: construct and Debug-format all ScopeType variants
+- `var_type_variants`: construct and Debug-format all VarType variants
+- `var_direction_variants`: construct and Debug-format all VarDirection variants
+- `signal_value_binary`: construct Binary variant, verify contents
+- `signal_value_real`: construct Real variant, verify value
+- `waveform_metadata_construct`: construct WaveformMetadata, verify all fields
 
-**Issues**:
-- description
+**Issues**: none
 
 **Decisions**:
-- description
-```
+- ID inner fields are `pub(crate)` so backends can construct them but TUI cannot
+- Enum variants based on FST/VCD spec coverage (12 scope types, 22 var types, 6 directions)

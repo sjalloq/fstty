@@ -5,6 +5,7 @@
 pub mod error;
 pub mod filter;
 pub mod hierarchy;
+pub mod types;
 pub mod waveform;
 pub mod writer;
 
