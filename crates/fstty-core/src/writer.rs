@@ -45,13 +45,13 @@ impl Default for FstWriterConfig {
 
 /// Handles writing filtered waveforms to FST format
 pub struct FilteredFstWriter {
-    config: FstWriterConfig,
+    _config: FstWriterConfig,
 }
 
 impl FilteredFstWriter {
     /// Create a new writer with the given configuration
     pub fn new(config: FstWriterConfig) -> Self {
-        Self { config }
+        Self { _config: config }
     }
 
     /// Write selected signals to a new FST file

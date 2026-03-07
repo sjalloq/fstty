@@ -331,3 +331,21 @@ All changes, decisions, and issues are logged below as work progresses.
 - wellen's `VarDirection::Unknown` maps to `VarDirection::Implicit`
 - Signal width: BitVector uses its length, Real→64, String→0
 - `is_alias` always false; `HierarchyBuilder` deduplicates via `SignalId` in its `HashSet`
+
+#### STEP-5: Add fst-reader dependency — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `Cargo.toml` (workspace): added `fst-reader` and `fst-writer` as local path dependencies (`../fst-reader`, `../fst-writer`)
+- `crates/fstty-core/Cargo.toml`: added `fst-reader` and `fst-writer` workspace dependencies
+- `crates/fstty-core/src/lib.rs`: added `fst_reader_smoke_tests` test module
+
+**Tests added**:
+- `open_fst_and_read_header`: opens `icarus/rv32_soc_TB.vcd.fst` with `fst_reader::FstReader::open()`, verifies `signal_count() > 0`, `var_count > 0`, and `end_time >= start_time`
+
+**Issues**: none
+
+**Decisions**:
+- Used local path deps (`../fst-reader`, `../fst-writer`) rather than git deps, matching the development setup
+- fst-reader pulls in its own fst-writer git dep; both coexist without conflict

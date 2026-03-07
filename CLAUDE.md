@@ -25,6 +25,11 @@ cargo test -p fstty-tui      # TUI tests
 cargo clippy                 # lint
 ```
 
+## TODO: Before release
+
+- Commit changes to `fst-reader` and `fst-writer` repos and push to GitHub.
+- Update `Cargo.toml` workspace dependencies to point to GitHub repos instead of local paths (`../fst-reader`, `../fst-writer`).
+
 ## Repo layout
 
 - `crates/fstty-core/` — core data model, types, hierarchy, WaveformSource trait, backends

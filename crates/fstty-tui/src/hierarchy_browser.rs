@@ -73,12 +73,6 @@ impl NodeId {
         NodeId::Var(raw)
     }
 
-    fn to_scope_ref(self) -> Option<wellen::ScopeRef> {
-        match self {
-            NodeId::Scope(raw) => Some(unsafe { std::mem::transmute(raw) }),
-            _ => None,
-        }
-    }
 }
 
 /// Filter configuration for the hierarchy browser

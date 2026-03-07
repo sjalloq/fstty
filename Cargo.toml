@@ -18,6 +18,8 @@ repository = "https://github.com/sjalloq/fstty-rs"
 # Waveform parsing and writing
 wellen = "0.19"
 fstapi = "0.0.3"
+fst-reader = { path = "../fst-reader" }
+fst-writer = { path = "../fst-writer" }
 
 # TUI
 ratatui = { version = "0.29", features = ["crossterm"] }

@@ -7,7 +7,7 @@ use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use tokio::sync::mpsc;
 
 use fstty_core::WaveformFile;

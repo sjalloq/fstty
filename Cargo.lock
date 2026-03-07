@@ -375,6 +375,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "fst-reader"
+version = "0.14.3"
+dependencies = [
+ "clap",
+ "fst-writer 0.3.1 (git+https://github.com/sjalloq/fst-writer?branch=fst-filter)",
+ "glob",
+ "lz4_flex 0.12.0",
+ "miniz_oxide",
+ "num_enum",
+ "regex",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
+name = "fst-writer"
+version = "0.3.1"
+dependencies = [
+ "lz4_flex 0.11.5",
+ "miniz_oxide",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
+name = "fst-writer"
+version = "0.3.1"
+source = "git+https://github.com/sjalloq/fst-writer?branch=fst-filter#97cc7d1d081457c1617c24b7ca1b83fb61b254c8"
+dependencies = [
+ "lz4_flex 0.11.5",
+ "miniz_oxide",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
 name = "fstapi"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -390,6 +426,8 @@ name = "fstty-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fst-reader 0.14.3",
+ "fst-writer 0.3.1",
  "fstapi",
  "glob",
  "regex",
@@ -1413,7 +1451,7 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1b17b319dff557c420010e79278ae0ab85c2dce8a8f5d2860c87579c6b9e108"
 dependencies = [
- "fst-reader",
+ "fst-reader 0.14.2",
  "indexmap",
  "leb128",
  "lz4_flex 0.11.5",
