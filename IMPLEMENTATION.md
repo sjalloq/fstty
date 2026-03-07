@@ -212,6 +212,7 @@ Test FST fixtures are in `crates/fstty-core/tests/fixtures/`. Do NOT use root-le
 ## Future steps (not in scope now)
 
 - **Signal server**: fstty-server crate with Arrow Flight
+- **Remove wellen from FST path**: Build hierarchy directly from fst-reader's `read_hierarchy` callback instead of wellen. This eliminates the double file scan and double hierarchy parse in `FstSource::open()` (wellen itself uses fst-reader internally, so the file is currently opened and scanned twice). wellen would then only be needed for VCD/GHW backends.
 - **VCD/GHW backend**: `VcdSource` implementing `WaveformSource` via wellen
 - **Enhanced title bar**: metadata display with timescale formatting
 - **Screenshot test infrastructure**
@@ -426,3 +427,24 @@ All changes, decisions, and issues are logged below as work progresses.
 - `ALL_SCOPE_TYPES` reduced from 25 entries (wellen) to 12 entries (fstty-core's `ScopeType` enum); VHDL/GHW scope types are mapped to `Module` by the wellen adapter, so they're covered by the Module filter
 - `components/tree.rs` imports updated but file left in place as dead code (not in module tree); will be removed in Step 11
 - Added `Hash` derive to `ScopeType` — clean, simple enum benefits from it; eliminates the unsafe discriminant-casting hack
+
+#### STEP-9: Simplify tabs to Browse + Export — 2026-03-07
+
+**Status**: complete
+
+**Changes**:
+- `crates/fstty-tui/src/app.rs`: replaced 4-tab `Tab` enum (Browse, Convert, Filter, Analyze) with 2-tab enum (Browse, Export); updated `Tab::ALL`, `label()`, `index()`, `from_index()`, `set_tab()`, key handlers (1/2 instead of 1/2/3/4), and `render_tab_content()` (Export placeholder instead of Convert/Filter/Analyze placeholders); added `Debug` derive to `Tab`
+
+**Tests added**:
+- `tab_all_contains_only_browse_and_export`: verify Tab::ALL has exactly 2 entries
+- `tab_labels`: verify label strings
+- `tab_index_roundtrip`: verify index/from_index roundtrip for all tabs
+- `tab_from_index_out_of_bounds_defaults_to_browse`: verify fallback
+- `tab_default_is_browse`: verify Default impl
+- `tab_switching_next_wraps`: Browse -> Export -> Browse
+- `tab_switching_prev_wraps`: Browse -> Export (backward wrap)
+
+**Issues**: none
+
+**Decisions**:
+- Export tab renders a placeholder message; full UI will be built in Step 10

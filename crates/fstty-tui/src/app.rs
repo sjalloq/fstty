@@ -19,42 +19,34 @@ use crate::hierarchy_browser::{HierarchyBrowser, ALL_SCOPE_TYPES};
 type LoadResult = std::result::Result<FstSource, String>;
 
 /// Available tabs/tools
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tab {
     #[default]
     Browse,
-    Convert,
-    Filter,
-    Analyze,
+    Export,
 }
 
 impl Tab {
-    pub const ALL: &'static [Tab] = &[Tab::Browse, Tab::Convert, Tab::Filter, Tab::Analyze];
+    pub const ALL: &'static [Tab] = &[Tab::Browse, Tab::Export];
 
     pub fn label(&self) -> &'static str {
         match self {
             Tab::Browse => "Browse",
-            Tab::Convert => "Convert",
-            Tab::Filter => "Filter",
-            Tab::Analyze => "Analyze",
+            Tab::Export => "Export",
         }
     }
 
     pub fn index(&self) -> usize {
         match self {
             Tab::Browse => 0,
-            Tab::Convert => 1,
-            Tab::Filter => 2,
-            Tab::Analyze => 3,
+            Tab::Export => 1,
         }
     }
 
     pub fn from_index(idx: usize) -> Self {
         match idx {
             0 => Tab::Browse,
-            1 => Tab::Convert,
-            2 => Tab::Filter,
-            3 => Tab::Analyze,
+            1 => Tab::Export,
             _ => Tab::Browse,
         }
     }
@@ -296,9 +288,7 @@ impl App {
     pub fn set_tab(&mut self, tab: &str) {
         self.active_tab = match tab.to_lowercase().as_str() {
             "1" | "browse" => Tab::Browse,
-            "2" | "convert" => Tab::Convert,
-            "3" | "filter" => Tab::Filter,
-            "4" | "analyze" => Tab::Analyze,
+            "2" | "export" => Tab::Export,
             _ => Tab::Browse,
         };
     }
@@ -540,9 +530,7 @@ impl App {
                 self.prev_tab();
             }
             KeyCode::Char('1') => self.active_tab = Tab::Browse,
-            KeyCode::Char('2') => self.active_tab = Tab::Convert,
-            KeyCode::Char('3') => self.active_tab = Tab::Filter,
-            KeyCode::Char('4') => self.active_tab = Tab::Analyze,
+            KeyCode::Char('2') => self.active_tab = Tab::Export,
             // Hierarchy browser navigation (when on Browse tab with a file loaded)
             KeyCode::Up | KeyCode::Char('k') if self.active_tab == Tab::Browse && self.waveform.is_some() => {
                 self.hierarchy_browser.up();
@@ -664,20 +652,8 @@ impl App {
     fn render_tab_content(&mut self, frame: &mut Frame, area: Rect) {
         match self.active_tab {
             Tab::Browse => self.render_browse_tab(frame, area),
-            Tab::Convert => {
-                let paragraph = Paragraph::new("VCD → FST conversion tools")
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(paragraph, area);
-            }
-            Tab::Filter => {
-                let paragraph = Paragraph::new("Signal filtering and time windowing")
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                frame.render_widget(paragraph, area);
-            }
-            Tab::Analyze => {
-                let paragraph = Paragraph::new("Analysis plugins and queries")
+            Tab::Export => {
+                let paragraph = Paragraph::new("Export: select signals and time range, then export filtered FST")
                     .alignment(Alignment::Center)
                     .block(Block::default().borders(Borders::ALL));
                 frame.render_widget(paragraph, area);
@@ -893,5 +869,63 @@ impl App {
             .block(block);
 
         frame.render_widget(message, popup_area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_all_contains_only_browse_and_export() {
+        assert_eq!(Tab::ALL.len(), 2);
+        assert_eq!(Tab::ALL[0], Tab::Browse);
+        assert_eq!(Tab::ALL[1], Tab::Export);
+    }
+
+    #[test]
+    fn tab_labels() {
+        assert_eq!(Tab::Browse.label(), "Browse");
+        assert_eq!(Tab::Export.label(), "Export");
+    }
+
+    #[test]
+    fn tab_index_roundtrip() {
+        for tab in Tab::ALL {
+            assert_eq!(Tab::from_index(tab.index()), *tab);
+        }
+    }
+
+    #[test]
+    fn tab_from_index_out_of_bounds_defaults_to_browse() {
+        assert_eq!(Tab::from_index(99), Tab::Browse);
+    }
+
+    #[test]
+    fn tab_default_is_browse() {
+        assert_eq!(Tab::default(), Tab::Browse);
+    }
+
+    #[test]
+    fn tab_switching_next_wraps() {
+        // Browse -> Export -> Browse
+        let mut tab = Tab::Browse;
+        tab = Tab::from_index((tab.index() + 1) % Tab::ALL.len());
+        assert_eq!(tab, Tab::Export);
+        tab = Tab::from_index((tab.index() + 1) % Tab::ALL.len());
+        assert_eq!(tab, Tab::Browse);
+    }
+
+    #[test]
+    fn tab_switching_prev_wraps() {
+        // Browse -> Export (wrap around)
+        let mut tab = Tab::Browse;
+        let idx = if tab.index() == 0 {
+            Tab::ALL.len() - 1
+        } else {
+            tab.index() - 1
+        };
+        tab = Tab::from_index(idx);
+        assert_eq!(tab, Tab::Export);
     }
 }
