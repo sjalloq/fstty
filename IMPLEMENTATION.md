@@ -216,6 +216,7 @@ Test FST fixtures are in `crates/fstty-core/tests/fixtures/`. Do NOT use root-le
 - **VCD/GHW backend**: `VcdSource` implementing `WaveformSource` via wellen
 - **Enhanced title bar**: metadata display with timescale formatting
 - **Screenshot test infrastructure**
+- **Switch TUI to `Box<dyn WaveformSource>`**: Currently uses `FstSource` directly; switch to trait object when VCD backend is added so Browse tab works identically for all formats.
 
 ---
 

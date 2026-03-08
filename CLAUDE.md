@@ -1,5 +1,52 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build and test
+
+```sh
+cargo build                              # full workspace
+cargo test -p fstty-core                 # core tests only
+cargo test -p fstty-tui                  # TUI tests only
+cargo test -p fstty-core -- test_name    # single test
+cargo clippy                             # lint
+cargo run -p fstty-tui -- path/to/file.fst  # run the TUI
+```
+
+**Local sibling dependencies**: `fst-reader` and `fst-writer` are referenced as local path deps (`../fst-reader`, `../fst-writer`). These repos must exist alongside this one for builds to work.
+
+## Architecture
+
+fstty is a two-crate workspace: `fstty-core` (data model + backends) and `fstty-tui` (terminal UI). A strict abstraction boundary separates them.
+
+### Two-library backend strategy
+
+The FST backend uses **two** libraries with no overlap:
+- **wellen** — parses the FST header to build the signal hierarchy (scopes, vars, metadata)
+- **fst-reader** — reads signal value-change data and provides raw block access for fast filtered export
+
+Neither library's types appear in fstty-core's public API. Both are wrapped behind fstty's own types (`Hierarchy`, `ScopeId`, `VarId`, `SignalId`, `WaveformSource`).
+
+### fstty-core key modules
+
+- `types.rs` — Opaque IDs (`ScopeId`, `VarId`, `SignalId`), enums (`ScopeType`, `VarType`, `VarDirection`), `SignalValue`, `WaveformMetadata`
+- `hierarchy.rs` — `Hierarchy` struct (built once at load, read-only) + `HierarchyBuilder` consuming `HierarchyEvent`s
+- `waveform.rs` — `WaveformSource` trait with single data method: `read_signals(signals, time_range, callback)`
+- `wellen_adapter.rs` — bridge that walks wellen's hierarchy arena and emits `HierarchyEvent`s
+- `fst/source.rs` — `FstSource` implementing `WaveformSource` (wellen for hierarchy, fst-reader for data)
+- `fst/export.rs` — filtered FST export via raw block copy (no decompression), `BlockInfo`, `ExportConfig`, `ExportResult`
+
+### fstty-tui key modules
+
+- `app.rs` — main `App` struct, event loop, two tabs (Browse + Export), rendering
+- `hierarchy_browser.rs` — tree navigation over `Hierarchy`, tri-state selection (Recursive/ScopeOnly/None), filtering by scope type
+- `export_state.rs` — state machine for VC block range selection (idle → anchor → finalized → clear)
+- `file_picker.rs` — FST file selection dialog
+
+### Critical type boundary
+
+The TUI crate **must not** import `wellen` or `fst-reader` types. It only sees fstty-core's public API. ID types have `pub(crate)` inner fields — backends can construct them but the TUI cannot.
+
 ## Project rules
 
 - Follow `PRD.md` for architecture and design decisions.
@@ -24,25 +71,7 @@
   - `multi_vc_block.fst` — multiple VC blocks (fst-writer generated)
   - `sigmoid_tb.vcd.fst` — real (floating point) signals (MyHDL)
 
-## Build and test
-
-```sh
-cargo build                  # full workspace
-cargo test -p fstty-core     # core tests
-cargo test -p fstty-tui      # TUI tests
-cargo clippy                 # lint
-```
-
 ## TODO: Before release
 
-- Commit changes to `fst-reader` and `fst-writer` repos and push to GitHub.
-  - `fst-reader`: added `Eq` and `Hash` derives to `FstSignalHandle` (needed for use as HashMap key in fstty-core).
-  - `fst-reader`: fixed `skip_frame` in `io.rs` to handle uncompressed frames (`compressed_length == 0`).
-- Update `Cargo.toml` workspace dependencies to point to GitHub repos instead of local paths (`../fst-reader`, `../fst-writer`).
-
-## Repo layout
-
-- `crates/fstty-core/` — core data model, types, hierarchy, WaveformSource trait, backends
-- `crates/fstty-tui/` — TUI application
-- `PRD.md` — product requirements document (source of truth for architecture)
-- `IMPLEMENTATION.md` — step-by-step plan with progress log
+- ~~`Cargo.toml` updated to point at GitHub repos instead of local paths.~~
+- `fst-reader` and `fst-writer`: changes are on `fst-filter` branches — merge to main when stable.

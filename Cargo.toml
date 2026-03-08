@@ -17,8 +17,8 @@ repository = "https://github.com/sjalloq/fstty-rs"
 [workspace.dependencies]
 # Waveform parsing and writing
 wellen = "0.19"
-fst-reader = { path = "../fst-reader" }
-fst-writer = { path = "../fst-writer" }
+fst-reader = { git = "https://github.com/sjalloq/fst-reader", branch = "fst-filter" }
+fst-writer = { git = "https://github.com/sjalloq/fst-writer", branch = "fst-filter" }
 
 # TUI
 ratatui = { version = "0.29", features = ["crossterm"] }
