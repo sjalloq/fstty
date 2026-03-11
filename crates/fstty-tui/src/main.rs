@@ -13,6 +13,10 @@ use fstty_tui::App;
 #[command(name = "fstty")]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// FST/VCD waveform file to open
+    #[arg(value_name = "FILE")]
+    input: Option<std::path::PathBuf>,
+
     /// Enable debug logging to file
     #[arg(short, long)]
     debug: bool,
@@ -68,6 +72,11 @@ async fn main() -> Result<()> {
     }
 
     let mut app = App::new()?;
+
+    // Load file from command line if provided
+    if let Some(ref input) = args.input {
+        app.load_file(input.clone());
+    }
 
     // Screenshot mode - render one frame and exit
     if args.screenshot {

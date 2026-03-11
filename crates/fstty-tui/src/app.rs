@@ -265,6 +265,11 @@ impl App {
         self.loaded_file = Some(path);
     }
 
+    /// Load a waveform file (public entry point for CLI usage)
+    pub fn load_file(&mut self, path: PathBuf) {
+        self.start_load(path);
+    }
+
     /// Start async loading of a waveform file
     fn start_load(&mut self, path: PathBuf) {
         self.loaded_file = Some(path.clone());
